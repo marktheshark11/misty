@@ -1,0 +1,13 @@
+# Python environments and generated files
+.venv/
+misty_venv/
+~/
+__pycache__/
+*.py[cod]
+*.egg-info/
+misty-python-sdk/.sdk-git-backup/
+
+# Local configuration and captured images
+.env
+.env.*
+misty_capture.*
