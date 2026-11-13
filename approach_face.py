@@ -1,14 +1,15 @@
 """Turn toward a detected face, keep eye contact, and hold ~1 m from the person.
 
 Body turns to keep the face centered horizontally, the head pitches to keep it centered
-vertically, and the front-center time-of-flight sensor decides when to stop or back up.
+vertically, and the distance to the person is guessed from the camera alone (the face
+detector's distance estimate, ~1-3 m). The front time-of-flight sensors are switched off
+as hazards and not read at all; bump sensors and the downward (cliff) sensors stay on.
 Used by main.py; can also be run on its own.
 """
 
 import threading
 import time
 
-from mistyPy.EventFilters import EventFilters
 from mistyPy.Events import Events
 from mistyPy.Robot import Robot
 
@@ -16,9 +17,14 @@ from idle_mode import get_property
 from settings import MISTY_IP
 
 # --- Calibration knobs (tune on the real robot) ---
-STOP_DISTANCE = 1.00   # metres from the front ToF sensor to the person
-BACKUP_DISTANCE = 0.90 # closer than this, Misty reverses back toward STOP_DISTANCE
-SLOW_DISTANCE = 1.30   # start slowing down inside this range (~ToF max range)
+STOP_DISTANCE = 1.00   # metres from the camera to the person's face
+BACKUP_DISTANCE = 0.85 # closer than this, Misty reverses back toward STOP_DISTANCE
+SLOW_DISTANCE = 2.00   # start slowing down inside this range
+MAX_ESTIMATE = 3.00    # camera guesses beyond this are treated as "3 m, far away"
+# Misty's face events report Distance as a raw number. Calibrate: stand exactly 2 m
+# away, read the "raw" value printed in the log, and set this to 2 / raw.
+FACE_DISTANCE_SCALE = 0.01  # assumes centimetres
+DISTANCE_SMOOTHING = 0.3    # 0-1; lower = steadier but slower to react
 MAX_SPEED = 25         # drive linear velocity, % of max. Keep low indoors.
 MIN_SPEED = 8          # below this Misty's wheels tend to stall
 BACKUP_SPEED = 10
@@ -30,38 +36,60 @@ ELEVATION_SIGN = 1     # flip to -1 if the head tilts away from the face
 PITCH_LIMITS = (-40, 25)  # negative pitch = head up
 START_PITCH = -15
 FACE_LOST_AFTER = 1.0  # seconds without a face event before the wheels stop
-TOF_STALE_AFTER = 0.5  # seconds; ToF has no reading when nothing is within ~1.3 m
+DISTANCE_LOG_EVERY = 2.0
+# Front ToF sensors to switch off as hazards (threshold 0 = disabled).
+FRONT_TOF_SENSORS = ("TOF_Left", "TOF_Center", "TOF_Right")
 LOOP_PERIOD = 0.15
 
 
-def drive_command(bearing, tof_distance):
-    """Return (linear, angular) drive velocities for a face at `bearing` and ToF reading."""
+def estimate_distance(raw, previous=None):
+    """Turn the face event's raw Distance into smoothed metres, capped at MAX_ESTIMATE."""
+    metres = min(MAX_ESTIMATE, float(raw) * FACE_DISTANCE_SCALE)
+    if previous is None:
+        return metres
+    return previous + DISTANCE_SMOOTHING * (metres - previous)
+
+
+def drive_command(bearing, distance):
+    """Return (linear, angular) drive velocities for a face at `bearing` and `distance` m."""
     angular = max(-MAX_TURN, min(MAX_TURN, BEARING_SIGN * TURN_GAIN * bearing))
-    if tof_distance is not None and tof_distance < BACKUP_DISTANCE:
+    # Front sensors are off, so never drive forward blind: no estimate = turn only.
+    if distance is None:
+        return 0, angular
+    if distance < BACKUP_DISTANCE:
         return -BACKUP_SPEED, angular
-    if tof_distance is not None and tof_distance <= STOP_DISTANCE:
+    if distance <= STOP_DISTANCE:
         return 0, angular
     # Don't creep forward while the face is far off to the side; turn first.
     if abs(bearing) > 8:
         return 0, angular
-    if tof_distance is None or tof_distance >= SLOW_DISTANCE:
+    if distance >= SLOW_DISTANCE:
         return MAX_SPEED, angular
-    fraction = (tof_distance - STOP_DISTANCE) / (SLOW_DISTANCE - STOP_DISTANCE)
+    fraction = (distance - STOP_DISTANCE) / (SLOW_DISTANCE - STOP_DISTANCE)
     return max(MIN_SPEED, MAX_SPEED * fraction), angular
 
 
 class FaceApproach:
-    """Face/ToF event state plus one control step. Caller starts face detection."""
+    """Face event state plus one control step. Caller starts face detection."""
 
     def __init__(self, misty):
         self.misty = misty
         self.lock = threading.Lock()
-        self.face = {"bearing": 0.0, "elevation": 0.0, "seen": 0.0}
-        self.tof = {"distance": None, "seen": 0.0}
+        self.face = {"bearing": 0.0, "elevation": 0.0, "distance": None, "raw": None, "seen": 0.0}
+        self.last_distance_log = 0.0
         self.pitch = START_PITCH
         self.driving = False
 
     def register(self):
+        """Switch off the front ToF hazards and subscribe to face events."""
+        # ponytail: with front ToFs off Misty won't stop for walls or furniture on its
+        # own; only the bump sensors catch a collision. Supervise it.
+        self.misty.update_hazard_settings(
+            timeOfFlightThresholds=[
+                {"sensorName": name, "threshold": 0} for name in FRONT_TOF_SENSORS
+            ]
+        ).raise_for_status()
+        print("Front time-of-flight sensors disabled; using camera distance only.")
         self.misty.register_event(
             Events.FaceRecognition,
             "ApproachFace",
@@ -70,13 +98,14 @@ class FaceApproach:
             # bound methods. A one-argument wrapper matches its callback API.
             callback_function=lambda event: self._on_face(event),
         )
-        self.misty.register_event(
-            Events.TimeOfFlight,
-            "ApproachFrontTof",
-            condition=[EventFilters.TimeOfFlightPosition.FrontCenter],
-            keep_alive=True,
-            callback_function=lambda event: self._on_tof(event),
-        )
+
+    def restore_hazards(self):
+        """Put Misty's hazard settings back to factory defaults (they persist otherwise)."""
+        try:
+            self.misty.update_hazard_settings(revertToDefault=True).raise_for_status()
+            print("Hazard settings restored to defaults.")
+        except Exception as error:
+            print(f"Could not restore hazard settings, re-enable front ToFs manually: {error}")
 
     def _on_face(self, event):
         message = get_property(event, "message", {})
@@ -86,16 +115,11 @@ class FaceApproach:
         with self.lock:
             self.face["bearing"] = float(bearing)
             self.face["elevation"] = float(get_property(message, "elevation", 0) or 0)
+            raw = get_property(message, "distance")
+            if raw:
+                self.face["raw"] = raw
+                self.face["distance"] = estimate_distance(raw, self.face["distance"])
             self.face["seen"] = time.monotonic()
-
-    def _on_tof(self, event):
-        message = get_property(event, "message", {})
-        # Status 0 is the only fully valid ToF reading.
-        if get_property(message, "status") != 0:
-            return
-        with self.lock:
-            self.tof["distance"] = float(get_property(message, "distanceInMeters"))
-            self.tof["seen"] = time.monotonic()
 
     def seconds_since_face(self):
         with self.lock:
@@ -119,12 +143,19 @@ class FaceApproach:
         with self.lock:
             face_visible = now - self.face["seen"] <= FACE_LOST_AFTER
             bearing, elevation = self.face["bearing"], self.face["elevation"]
-            fresh = now - self.tof["seen"] <= TOF_STALE_AFTER
-            distance = self.tof["distance"] if fresh else None
+            distance, raw = self.face["distance"], self.face["raw"]
+            if not face_visible:
+                # Forget the old guess so a new face starts from its own estimate.
+                self.face["distance"] = None
 
         if not face_visible:
             self.halt()
             return False
+
+        if now - self.last_distance_log >= DISTANCE_LOG_EVERY:
+            self.last_distance_log = now
+            shown = "unknown" if distance is None else f"{distance:.2f} m"
+            print(f"Camera distance estimate: {shown} (raw {raw})")
 
         # Keep eyeline: nudge head pitch toward the face's vertical offset.
         new_pitch = self.pitch + ELEVATION_SIGN * PITCH_GAIN * elevation
@@ -148,7 +179,7 @@ def main():
     detection_started = False
     try:
         approach.face_forward(START_PITCH)
-        approach.register()
+        approach.register()  # disables front ToFs; restored in finally
         time.sleep(0.5)
         misty.start_face_detection().raise_for_status()
         detection_started = True
@@ -169,15 +200,20 @@ def main():
             except Exception as error:
                 print(f"Could not stop face detection: {error}")
         misty.unregister_all_events()
+        approach.restore_hazards()
 
 
 def self_check():
-    assert drive_command(0, 0.95)[0] == 0, "holds inside the 90-100 cm band"
+    assert drive_command(0, 0.95)[0] == 0, "holds inside the 85-100 cm band"
     assert drive_command(0, 0.70)[0] == -BACKUP_SPEED, "backs up when too close"
-    assert drive_command(0, None)[0] == MAX_SPEED, "no ToF reading = far away"
-    assert MIN_SPEED <= drive_command(0, 1.15)[0] < MAX_SPEED, "slows down when close"
-    assert drive_command(20, 2.0)[0] == 0, "turns before driving when face is off-center"
+    assert drive_command(0, None)[0] == 0, "no camera estimate = never drive forward blind"
+    assert drive_command(0, 3.0)[0] == MAX_SPEED, "full speed when far"
+    assert MIN_SPEED <= drive_command(0, 1.5)[0] < MAX_SPEED, "slows down when close"
+    assert drive_command(20, 2.5)[0] == 0, "turns before driving when face is off-center"
     assert drive_command(100, None)[1] == MAX_TURN * BEARING_SIGN, "turn is clamped"
+    assert estimate_distance(500) == MAX_ESTIMATE, "guesses are capped at 3 m"
+    assert estimate_distance(150) == 1.5
+    assert 2.0 < estimate_distance(100, previous=3.0) < 3.0, "smoothing moves part-way"
 
 
 if __name__ == "__main__":

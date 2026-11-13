@@ -213,6 +213,7 @@ def main() -> None:
             except Exception as error:
                 print(f"Could not stop face detection cleanly: {error}")
         misty.unregister_all_events()
+        approach.restore_hazards()
         try:
             misty.move_head(
                 pitch=NEUTRAL_PITCH,
