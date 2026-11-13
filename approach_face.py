@@ -63,14 +63,19 @@ class FaceApproach:
 
     def register(self):
         self.misty.register_event(
-            Events.FaceRecognition, "ApproachFace", keep_alive=True, callback_function=self._on_face
+            Events.FaceRecognition,
+            "ApproachFace",
+            keep_alive=True,
+            # The SDK checks the raw argument count, which includes `self` on
+            # bound methods. A one-argument wrapper matches its callback API.
+            callback_function=lambda event: self._on_face(event),
         )
         self.misty.register_event(
             Events.TimeOfFlight,
             "ApproachFrontTof",
             condition=[EventFilters.TimeOfFlightPosition.FrontCenter],
             keep_alive=True,
-            callback_function=self._on_tof,
+            callback_function=lambda event: self._on_tof(event),
         )
 
     def _on_face(self, event):
