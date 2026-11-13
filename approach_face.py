@@ -26,7 +26,7 @@ MAX_ESTIMATE = 3.00    # camera guesses beyond this are treated as "3 m, far awa
 FACE_DISTANCE_SCALE = 0.01  # assumes centimetres
 DISTANCE_SMOOTHING = 0.3    # 0-1; lower = steadier but slower to react
 MAX_SPEED = 25         # drive linear velocity, % of max. Keep low indoors.
-MIN_SPEED = 8          # below this Misty's wheels tend to stall
+MIN_SPEED = 15         # slowest approach speed; at 8 Misty stalled short of the target
 BACKUP_SPEED = 10
 TURN_GAIN = 2.5        # angular % per degree of face bearing
 MAX_TURN = 30
@@ -152,11 +152,6 @@ class FaceApproach:
             self.halt()
             return False
 
-        if now - self.last_distance_log >= DISTANCE_LOG_EVERY:
-            self.last_distance_log = now
-            shown = "unknown" if distance is None else f"{distance:.2f} m"
-            print(f"Camera distance estimate: {shown} (raw {raw})")
-
         # Keep eyeline: nudge head pitch toward the face's vertical offset.
         new_pitch = self.pitch + ELEVATION_SIGN * PITCH_GAIN * elevation
         new_pitch = max(PITCH_LIMITS[0], min(PITCH_LIMITS[1], new_pitch))
@@ -165,6 +160,13 @@ class FaceApproach:
             self.misty.move_head(pitch=new_pitch, roll=0, yaw=0, duration=0.3, units="degrees")
 
         linear, angular = drive_command(bearing, distance)
+        if now - self.last_distance_log >= DISTANCE_LOG_EVERY:
+            self.last_distance_log = now
+            shown = "unknown" if distance is None else f"{distance:.2f} m"
+            print(
+                f"Camera distance estimate: {shown} (raw {raw}), bearing {bearing:.0f}°, "
+                f"drive linear {linear:.0f} angular {angular:.0f}"
+            )
         if linear == 0 and abs(angular) < 3:
             self.halt()
         else:
