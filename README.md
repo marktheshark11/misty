@@ -76,7 +76,7 @@ The model must be installed in Ollama first. For example, run `ollama pull qwen2
 ## Project files
 
 - `main.py` runs the idle scan, approach, photo capture, Ollama description, and speech. Run this file.
-- `approach_face.py` turns/drives Misty toward a face and holds ~2 m, guessing the distance (1-3 m) from the camera only. It switches off the front time-of-flight sensors while running and restores Misty's default hazard settings on exit. Tuning knobs (speeds, stop distance, turn direction, distance calibration) are at the top. Can also run alone: `python .\approach_face.py`.
+- `approach_face.py` turns/drives Misty toward a face and holds ~2 m, guessing the distance (1-3 m) from the camera only. The front time-of-flight sensors are only a collision stop: if something is right in front (about 25 cm), Misty stops and looks up in case it is the person. If it sees a face it stays there; if not, it backs away and searches for a face again. Tuning knobs (speeds, stop distance, turn direction, distance calibration) are at the top. Can also run alone: `python .\approach_face.py`.
 - `misty_camera.py` captures the image from Misty and decodes it.
 - `ollama_client.py` sends the image to Ollama and reads the description.
 - `settings.py` contains the Misty IP, Ollama settings, and capture image filename.
@@ -106,7 +106,6 @@ Press `Ctrl+C` to stop.
 ## Troubleshooting
 
 - **Misty stops too early or too late:** stand exactly 2 m away, read the `raw` value in the `Camera distance estimate` log line, and set `FACE_DISTANCE_SCALE = 2 / raw` in `approach_face.py`.
-- **Front sensors still off after a crash:** if the script didn't exit cleanly, run `python -c "from mistyPy.Robot import Robot; from settings import MISTY_IP; Robot(MISTY_IP).update_hazard_settings(revertToDefault=True)"`.
 - **Misty turns or tilts away from the face:** set `BEARING_SIGN` or `ELEVATION_SIGN` to `-1` in `approach_face.py`.
 - **Misty drives — keep the floor clear and stay close the first few runs.**
 
