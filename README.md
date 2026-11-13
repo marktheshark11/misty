@@ -1,6 +1,6 @@
 # Misty image recognition
 
-This script asks Misty to take a picture, sends the image directly from this PC to Ollama, prints Ollama's description, and has Misty say it aloud. No FastAPI server or `robot_image_rec` repo is needed.
+The main program has Misty scan for a face, follow it, and say “Hey!” before sending a picture directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. Face detection and tracking run on this PC rather than on Misty (see [Face tracking](#face-tracking)). No FastAPI server or `robot_image_rec` repo is needed.
 
 ## 1. Install and start Ollama
 
@@ -56,10 +56,10 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Make sure the Ollama app/server is running and Misty is on and reachable. From this folder, with the virtual environment active, run:
 
 ```powershell
-python .\main.py
+python .\main.py            # add --preview to see what the face tracker sees
 ```
 
-The first run takes longer while Ollama loads the model. The script captures an image, saves a copy as `misty_capture.jpg`, prints the description, and asks Misty to speak it.
+The first run takes longer while Ollama loads the model and the face models download (about 40 MB). Misty scans until it finds a face, then follows it while Ollama describes a visible clothing detail. It speaks the result once per person, then resumes scanning when that person is gone. The picture sent to Ollama is also saved as `misty_capture.jpg`. Press `Ctrl+C` to stop, or `q` in the preview window.
 
 ## Optional Ollama settings
 
@@ -75,33 +75,30 @@ The model must be installed in Ollama first. For example, run `ollama pull qwen2
 
 ## Project files
 
-- `main.py` connects the steps and has Misty speak the result. Run this file.
-- `misty_camera.py` captures the image from Misty and decodes it.
+- `main.py` runs the idle scan, face tracking, photo capture, Ollama description, and speech. Run this file.
 - `ollama_client.py` sends the image to Ollama and reads the description.
 - `settings.py` contains the Misty IP, Ollama settings, and capture image filename.
-- `follow_face.py` follows one person's face, with vision running on this PC.
+- `idle_mode.py` is a standalone idle scan that says “Hello” to each person it finds and follows them.
+- `follow_face.py` follows one person and describes the scene with Ollama about every 10 seconds.
+- `face_session.py` runs the shared face tracking used by the three scripts above.
 - `misty_stream.py` streams Misty's camera to this PC over RTSP.
 - `face_tracker.py` detects faces and keeps the lock on one person.
 - `head_controller.py` points Misty's head at the tracked face.
 - `face_models.py` downloads the face models into `models/` on first run.
+- `misty_camera.py` takes a single picture with Misty's own camera. The scripts above don't use it, because Misty's camera is busy streaming while they run.
 
-## Face following
+## Face tracking
 
-`follow_face.py` follows one person's face. Misty's built-in face detection is slow and has no notion of *which* person it is following, so this script runs the vision on this PC instead:
+`main.py`, `idle_mode.py` and `follow_face.py` all use the same face tracking. Misty's built-in face detection is slow and has no notion of *which* person it is following, so the vision runs on this PC instead:
 
 1. Misty streams its camera to this PC over RTSP (640x480, 30 fps by default).
 2. This PC detects faces on every frame with OpenCV's YuNet model.
 3. It locks onto one person using an SFace face embedding. Other people in view are ignored. If the person is briefly hidden, Misty keeps aiming where they were heading, then waits about 3 seconds for that *same* person before picking someone new.
 4. It drives Misty's head directly, about 10 times per second. Each frame is matched with where the head was pointing when the frame was captured, so network delay doesn't make the head overshoot or wobble.
 
-While a face is tracked, it also describes the scene with Ollama about every 10 seconds and has Misty say it. Misty shows `e_joy.jpg` while tracking and `e_defaultcontent.jpg` otherwise.
+Misty shows `e_joy.jpg` while following someone and `e_defaultcontent.jpg` otherwise. Every script accepts `--preview`, which opens a window with a green box on the person being followed and grey boxes on everyone else.
 
-```powershell
-python .\follow_face.py            # add --preview to see what the tracker sees
-python .\follow_face.py --no-describe
-```
-
-The first run downloads about 40 MB of face models into `models/`. Press `Ctrl+C` to stop (or `q` in the preview window). On exit, the script stops the stream and turns Misty's camera service back on. **While the script runs, Misty's on-board camera features (TakePicture, face detection) are unavailable**, because Misty can't stream and use its camera at the same time. Keep Misty supervised while trying the behavior.
+The first run downloads about 40 MB of face models into `models/`. On exit, each script stops the stream and turns Misty's camera service back on. **While the script runs, Misty's on-board camera features (TakePicture, face detection) are unavailable**, because Misty can't stream and use its camera at the same time. Keep Misty supervised while trying the behavior.
 
 ### Tuning
 
@@ -116,6 +113,21 @@ Set these environment variables before running if needed:
 | `MISTY_STREAM_PORT` | `1936` | RTSP port Misty publishes on. |
 
 The script prints the frame rate and processing time every 5 seconds. `head pose: measured` means Misty is reporting its actual head position; `commanded` means it fell back to the last positions sent.
+
+## Other scripts
+
+`idle_mode.py` runs on its own. Misty slowly looks up and down, then a little left and right. When it finds a face, it says “Hello” and follows that person. Once they're gone, it returns to the idle scan.
+
+`follow_face.py` follows one person without scanning and, while it's following them, describes the scene with Ollama about every 10 seconds. Add `--no-describe` to only follow.
+
+With the Python virtual environment active and `MISTY_IP` set, run:
+
+```powershell
+python .\idle_mode.py
+python .\follow_face.py
+```
+
+Press `Ctrl+C` to stop.
 
 ## Troubleshooting
 

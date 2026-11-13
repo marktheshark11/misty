@@ -36,6 +36,10 @@ class _History:
         self.values = collections.deque(maxlen=maxlen)
 
     def add(self, t: float, value: float) -> None:
+        # A new command supersedes any planned (future) samples from an earlier one.
+        while self.times and self.times[-1] >= t:
+            self.times.pop()
+            self.values.pop()
         self.times.append(t)
         self.values.append(value)
 
@@ -90,10 +94,16 @@ class HeadPose:
                     self._measured[axis].add(time.monotonic(), float(value))
         return callback
 
-    def record_command(self, t: float, yaw: float, pitch: float) -> None:
+    def record_command(self, t: float, yaw: float, pitch: float, duration: float = 0.0) -> None:
+        """Record a command; with a duration, the head is assumed to ramp there linearly."""
         with self._lock:
-            self._commanded["yaw"].add(t, yaw)
-            self._commanded["pitch"].add(t, pitch)
+            for axis, value in (("yaw", yaw), ("pitch", pitch)):
+                history = self._commanded[axis]
+                if duration > 0:
+                    start = history.at(t)
+                    if start is not None:
+                        history.add(t, start)
+                history.add(t + duration, value)
 
     def measured_is_live(self) -> bool:
         with self._lock:
@@ -123,6 +133,7 @@ class HeadController:
         self._period = 1.0 / rate_hz
         self._deadband = deadband_deg
         self._lock = threading.Lock()
+        self._send_lock = threading.Lock()  # One HTTP session, used from two threads.
         self._target = None
         self._commanded = (start_yaw, start_pitch)
         self._last_send = 0.0
@@ -138,13 +149,22 @@ class HeadController:
         with self._lock:
             self._target = None
 
+    def move_to(self, yaw: float, pitch: float, duration: float) -> None:
+        """Stop following and move the head over `duration` seconds (e.g. idle scanning)."""
+        self.clear_target()
+        with self._send_lock:
+            self._post(yaw, pitch, {"Duration": duration}, duration)
+
     def send(self, yaw: float, pitch: float, velocity: float) -> None:
+        with self._send_lock:
+            self._post(yaw, pitch, {"Velocity": velocity}, 0.0)
+
+    def _post(self, yaw: float, pitch: float, timing: dict, duration: float) -> None:
         yaw, pitch = _clamp(yaw, YAW_LIMITS), _clamp(pitch, PITCH_LIMITS)
         try:
             self._session.post(
                 self._url,
-                json={"Pitch": pitch, "Roll": 0, "Yaw": yaw,
-                      "Velocity": velocity, "Units": "degrees"},
+                json={"Pitch": pitch, "Roll": 0, "Yaw": yaw, "Units": "degrees", **timing},
                 timeout=1.0,
             )
         except requests.RequestException as error:
@@ -153,7 +173,7 @@ class HeadController:
         now = time.monotonic()
         self._commanded = (yaw, pitch)
         self._last_send = now
-        self._pose.record_command(now, yaw, pitch)
+        self._pose.record_command(now, yaw, pitch, duration)
 
     def _run(self) -> None:
         while self._running:
@@ -169,7 +189,11 @@ class HeadController:
                 if error > self._deadband:
                     # Big jumps move fast; small corrections move gently to avoid jitter.
                     velocity = max(20.0, min(100.0, 12.0 + error * 4.0))
-                    self.send(aim_yaw, aim_pitch, velocity)
+                    with self._send_lock:
+                        with self._lock:
+                            still_following = self._target is not None
+                        if still_following:  # A move_to() may have taken over meanwhile.
+                            self._post(aim_yaw, aim_pitch, {"Velocity": velocity}, 0.0)
             time.sleep(max(0.0, self._period - (time.monotonic() - started)))
 
     def close(self) -> None:
