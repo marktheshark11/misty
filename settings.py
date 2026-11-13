@@ -20,3 +20,6 @@ STREAM_BITRATE = int(os.getenv("MISTY_STREAM_BITRATE", "1500000"))
 STREAM_LATENCY = float(os.getenv("MISTY_STREAM_LATENCY", "0.25"))
 # Horizontal field of view of the streamed image, in degrees.
 CAMERA_HFOV = float(os.getenv("MISTY_CAMERA_HFOV", "70"))
+# Head speed in degrees/second at full velocity. Only used to estimate head position when
+# Misty isn't reporting it; erring low is safe (slower convergence, no runaway).
+HEAD_MAX_SPEED = float(os.getenv("MISTY_HEAD_SPEED", "30"))

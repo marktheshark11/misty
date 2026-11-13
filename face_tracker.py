@@ -88,6 +88,7 @@ class FaceTracker:
         self.template = None    # Running-average embedding (adapts to pose/light).
         self.frames_since_id = 0
         self._uncertain_frames = 0
+        self._pose_uncertainty = 0.0
         self._candidate = None
         self._candidate_count = 0
 
@@ -150,8 +151,13 @@ class FaceTracker:
                 faces.append(Face(row=row, yaw=yaw, pitch=pitch, width_px=float(row[2])))
         return faces
 
-    def update(self, frame, head_yaw, head_pitch, t=None) -> TrackResult:
+    def update(self, frame, head_yaw, head_pitch, t=None, pose_uncertainty=0.0) -> TrackResult:
+        """pose_uncertainty: degrees the head pose may be off for this frame (e.g. the head
+        was mid-move and its position is only estimated). Such frames still keep the lock,
+        with a wider gate, but don't move the face estimate, so a wrong pose can't drag
+        the head after a phantom position."""
         t = time.monotonic() if t is None else t
+        self._pose_uncertainty = pose_uncertainty
         faces = self.detect(frame, head_yaw, head_pitch)
         if self.state == SEARCHING:
             return self._search(frame, faces, t)
@@ -191,7 +197,8 @@ class FaceTracker:
         best_sim = None
         in_gate = []
         if faces:
-            gate = cfg.gate_deg + min(since_seen, 0.5) * cfg.max_speed_deg
+            gate = (cfg.gate_deg + min(since_seen, 0.5) * cfg.max_speed_deg
+                    + self._pose_uncertainty)
             for face in faces:
                 dist = math.hypot(face.yaw - pred_yaw, face.pitch - pred_pitch)
                 if dist <= gate + 0.5 * self._angular_width(face.width_px, image_w):
@@ -270,7 +277,13 @@ class FaceTracker:
         return TrackResult(SEARCHING, faces=faces)
 
     def _correct(self, face: Face, pred_yaw, pred_pitch, dt, t, reset_velocity=False) -> None:
-        if reset_velocity:
+        if self._pose_uncertainty > 1.5 and not reset_velocity:
+            # Seen, but the pose is unreliable: stay locked, and let the motion estimate
+            # fade rather than extrapolating it blindly until the pose is trustworthy.
+            self.yaw, self.pitch = pred_yaw, pred_pitch
+            self.vy *= 0.8
+            self.vp *= 0.8
+        elif reset_velocity:
             self.yaw, self.pitch, self.vy, self.vp = face.yaw, face.pitch, 0.0, 0.0
         else:
             a, b = self.cfg.alpha, self.cfg.beta

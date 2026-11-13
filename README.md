@@ -111,8 +111,9 @@ Set these environment variables before running if needed:
 | `MISTY_STREAM_LATENCY` | `0.25` | Seconds from Misty's camera to this PC. If the head overshoots and swings back, raise it; if it lags behind a moving face, lower it. |
 | `MISTY_CAMERA_HFOV` | `70` | Horizontal field of view of the stream, in degrees. If the head consistently stops short of the face, raise it; if it overshoots, lower it. |
 | `MISTY_STREAM_PORT` | `1936` | RTSP port Misty publishes on. |
+| `MISTY_HEAD_SPEED` | `30` | Head speed (degrees/second at full velocity) assumed when Misty isn't reporting its head position. Too high makes the head overshoot; too low only makes it slower. |
 
-The script prints the frame rate and processing time every 5 seconds. `head pose: measured` means Misty is reporting its actual head position; `commanded` means it fell back to the last positions sent.
+Every 5 seconds the scripts print a status line: frame rate, processing time, tracker state, where the face is, where the head is, and how many head commands were sent (and failed). Angles are in degrees; positive yaw is Misty's left, negative pitch is up. `head (measured)` means Misty is reporting its actual head position, which gives the best tracking. `head (estimated)` means it isn't, and the head position is estimated from the commands sent. Tracking still works then, but it follows a moving face in steps rather than smoothly.
 
 ## Other scripts
 

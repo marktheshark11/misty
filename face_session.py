@@ -30,7 +30,7 @@ from face_tracker import COASTING, SEARCHING, TRACKING, FaceTracker, TrackerConf
 from head_controller import HeadController, HeadPose
 from misty_stream import (LatestFrameReader, port_is_open, start_misty_stream,
                           stop_misty_stream)
-from settings import (CAMERA_HFOV, MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_HEIGHT,
+from settings import (CAMERA_HFOV, HEAD_MAX_SPEED, MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_HEIGHT,
                       STREAM_LATENCY, STREAM_PORT, STREAM_WIDTH)
 
 NEUTRAL_PITCH = -15  # Negative pitch tilts Misty's head upward.
@@ -60,7 +60,7 @@ class FaceSession:
         self._eyes_show_face = None
         self._frame = None
         self._seq = 0
-        self._stats = [time.monotonic(), 0, 0.0]
+        self._stats = [time.monotonic(), 0, 0.0, 0, 0]
         self._fps = self._proc_ms = 0.0
 
     # ----- lifecycle ---------------------------------------------------------------------
@@ -97,7 +97,7 @@ class FaceSession:
 
         self._pose = HeadPose(misty, start_yaw=0.0, start_pitch=NEUTRAL_PITCH)
         self._head = HeadController(MISTY_IP, self._pose, 0.0, NEUTRAL_PITCH,
-                                    lead_time=STREAM_LATENCY)
+                                    lead_time=STREAM_LATENCY, max_speed_dps=HEAD_MAX_SPEED)
 
         print("Waiting for video...")
         deadline = time.monotonic() + 75  # Allows a full TCP and a UDP attempt.
@@ -140,7 +140,8 @@ class FaceSession:
 
         captured = received - STREAM_LATENCY
         head_yaw, head_pitch = self._pose.at(captured)
-        result = self.tracker.update(frame, head_yaw, head_pitch, t=captured)
+        result = self.tracker.update(frame, head_yaw, head_pitch, t=captured,
+                                     pose_uncertainty=self._pose.uncertainty(captured))
         if result.state == SEARCHING:
             self._head.clear_target()
         else:
@@ -179,10 +180,15 @@ class FaceSession:
         if now - stats[0] >= 5.0:
             self._fps = stats[1] / (now - stats[0])
             self._proc_ms = 1000 * stats[2] / stats[1]
-            source = "measured" if self._pose.measured_is_live() else "commanded"
-            print(f"[{self._fps:.1f} fps, {self._proc_ms:.1f} ms/frame, {result.state}, "
-                  f"head pose: {source}]")
-            self._stats = [now, 0, 0.0]
+            source = "measured" if self._pose.measured_is_live() else "estimated"
+            head_yaw, head_pitch = self._pose.at(now)
+            sent, failed = self._head.sent - stats[3], self._head.failed - stats[4]
+            face = (f"face at yaw {result.yaw:+.0f} pitch {result.pitch:+.0f}"
+                    if result.yaw is not None else "no face")
+            print(f"[{self._fps:.1f} fps, {self._proc_ms:.1f} ms/frame, {result.state}, {face}; "
+                  f"head ({source}) yaw {head_yaw:+.0f} pitch {head_pitch:+.0f}; "
+                  f"{sent} head cmds" + (f", {failed} FAILED" if failed else "") + "]")
+            self._stats = [now, 0, 0.0, self._head.sent, self._head.failed]
 
     def _draw_preview(self, frame, result) -> int:
         frame = frame.copy()
