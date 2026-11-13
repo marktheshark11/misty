@@ -1,7 +1,7 @@
 import os
 
 
-MISTY_IP = os.getenv("MISTY_IP")
+MISTY_IP = os.getenv("MISTY_IP", "192.168.1.237")
 if not MISTY_IP:
     raise RuntimeError("Set the MISTY_IP environment variable to Misty's network address.")
 
