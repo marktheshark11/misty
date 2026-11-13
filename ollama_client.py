@@ -7,11 +7,9 @@ from settings import OLLAMA_HOST, OLLAMA_MODEL
 
 DESCRIPTION_PROMPT = "Describe the main subject of this image in one short, direct sentence."
 PERSON_PROMPT = (
-    "Look at the person in this image. Find one specific, clearly visible detail about their "
-    "appearance, clothing, or accessories, such as 'gray shirt', 'curly hair', 'red glasses', "
-    "or 'blue striped scarf'. "
-    "Return only the detail in 2 to 6 words, with no sentence or explanation. Do not guess. "
-    "If there is no person or no specific detail is visible, return exactly NONE."
+    "Look at the person's clothing. Return only its clearly visible color and one piece of clothing, "
+    "for example: 'blue shirt' or 'black jacket'. Do not mention anything else. "
+    "Do not guess the color or clothing. If either is not clearly visible, return exactly: clothes."
 )
 
 
@@ -44,7 +42,7 @@ def describe_image(image_bytes: bytes) -> str:
 
 
 def describe_person(image_bytes: bytes):
-    """Return a specific visible clothing/accessory detail, or None if unclear."""
+    """Return a visible clothing color and item, defaulting to 'clothes' if unclear."""
     print(f"Sending {len(image_bytes)} bytes directly to Ollama ({OLLAMA_MODEL})...")
     response = requests.post(
         f"{OLLAMA_HOST}/api/chat",
@@ -67,14 +65,15 @@ def describe_person(image_bytes: bytes):
 
     detail = response.json().get("message", {}).get("content", "").strip().strip('"').strip()
     if not detail or detail.casefold().strip(" .!\n") in {
+        "clothes",
         "none",
         "unknown",
         "not visible",
         "no clear detail",
         "i can't see a clear clothing detail",
     }:
-        return None
-    # Guard against a model ignoring the requested short-detail format.
-    if len(detail.split()) > 10 or "can't see" in detail.casefold() or "cannot see" in detail.casefold():
-        return None
+        return "clothes"
+    # Guard against a model returning a sentence instead of a color and garment.
+    if len(detail.split()) > 5 or any(char in detail for char in ".!?\n"):
+        return "clothes"
     return detail.rstrip(".!?")

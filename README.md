@@ -1,6 +1,6 @@
 # Misty image recognition
 
-The main program has Misty scan for a face, say “Hey!”, then turn and drive toward the person while keeping eye contact, stopping about 1 m in front of them (and backing up if they step closer). Once there, it takes a picture and sends it directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. No FastAPI server or `robot_image_rec` repo is needed.
+The main program has Misty scan for a face, then turn and drive toward the person while keeping eye contact, stopping about 1 m in front of them (and backing up if they step closer). Once there, Misty takes a picture, waves, and says “Hi, I’m Misty!” It asks Ollama to identify a visible clothing color and item, gives a compliment, then asks to be petted every 3 seconds until one of the head touch sensors is touched. No name listening is enabled right now. No FastAPI server or `robot_image_rec` repo is needed.
 
 ## 1. Install and start Ollama
 
@@ -59,7 +59,7 @@ Make sure the Ollama app/server is running and Misty is on and reachable. From t
 python .\main.py
 ```
 
-The first run takes longer while Ollama loads the model. Misty scans until it detects a face, then follows it while Ollama describes a visible clothing detail. It speaks the result once for each face-detection session, then resumes scanning when the face is no longer detected.
+The first run takes longer while Ollama loads the model. Misty scans until it detects a face, approaches, takes a picture, waves, introduces itself, gives a clothing compliment, then repeats its petting invitation every 3 seconds until a head touch sensor is activated. It speaks the result once for each face-detection session, then resumes scanning when the face is no longer detected.
 
 ## Optional Ollama settings
 
