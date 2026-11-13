@@ -1,6 +1,6 @@
 # Misty image recognition
 
-This script asks Misty to take a picture, sends the image directly from this PC to Ollama, prints Ollama's description, and has Misty say it aloud. No FastAPI server or `robot_image_rec` repo is needed.
+The main program has Misty scan for a face, follow it, and say “Hey!” before taking a picture and sending it directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. No FastAPI server or `robot_image_rec` repo is needed.
 
 ## 1. Install and start Ollama
 
@@ -59,7 +59,7 @@ Make sure the Ollama app/server is running and Misty is on and reachable. From t
 python .\main.py
 ```
 
-The first run takes longer while Ollama loads the model. The script captures an image, saves a copy as `misty_capture.jpg`, prints the description, and asks Misty to speak it.
+The first run takes longer while Ollama loads the model. Misty scans until it detects a face, then follows it while Ollama describes a visible clothing detail. It speaks the result once for each face-detection session, then resumes scanning when the face is no longer detected.
 
 ## Optional Ollama settings
 
@@ -75,10 +75,11 @@ The model must be installed in Ollama first. For example, run `ollama pull qwen2
 
 ## Project files
 
-- `main.py` connects the steps and has Misty speak the result. Run this file.
+- `main.py` runs the idle scan, face tracking, photo capture, Ollama description, and speech. Run this file.
 - `misty_camera.py` captures the image from Misty and decodes it.
 - `ollama_client.py` sends the image to Ollama and reads the description.
 - `settings.py` contains the Misty IP, Ollama settings, and capture image filename.
+- `idle_mode.py` is a standalone face-aware idle scan that greets detected faces.
 - `follow_face.py` is a separate prototype that uses Misty's built-in face-following action.
 
 ## Try the face-following prototype
@@ -90,6 +91,16 @@ python .\follow_face.py
 ```
 
 Place one face in front of Misty in a well-lit area. Press `Ctrl+C` to stop. The program sends `STOP-FOLLOW` and removes the temporary actions it created. Keep Misty supervised while trying the behavior.
+
+## Run idle mode
+
+`idle_mode.py` runs on its own. Misty slowly looks up and down, then a little left and right. When it detects a face, it says “Hello” and uses its built-in face tracking to follow it. When the face is no longer visible, it returns to the idle scan. With the Python virtual environment active and `MISTY_IP` set, run:
+
+```powershell
+python .\idle_mode.py
+```
+
+Press `Ctrl+C` to stop.
 
 ## Troubleshooting
 
