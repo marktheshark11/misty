@@ -1,4 +1,4 @@
-"""Turn toward a detected face, keep eye contact, and hold ~1 m from the person.
+"""Turn toward a detected face, keep eye contact, and hold ~2 m from the person.
 
 Body turns to keep the face centered horizontally, the head pitches to keep it centered
 vertically, and the distance to the person is guessed from the camera alone (the face
@@ -17,9 +17,9 @@ from idle_mode import get_property
 from settings import MISTY_IP
 
 # --- Calibration knobs (tune on the real robot) ---
-STOP_DISTANCE = 1.00   # metres from the camera to the person's face
-BACKUP_DISTANCE = 0.85 # closer than this, Misty reverses back toward STOP_DISTANCE
-SLOW_DISTANCE = 2.00   # start slowing down inside this range
+STOP_DISTANCE = 2.00   # metres from the camera to the person's face
+BACKUP_DISTANCE = 1.85 # closer than this, Misty reverses back toward STOP_DISTANCE
+SLOW_DISTANCE = 2.70   # start slowing down inside this range
 MAX_ESTIMATE = 3.00    # camera guesses beyond this are treated as "3 m, far away"
 # Misty's face events report Distance as a raw number. Calibrate: stand exactly 2 m
 # away, read the "raw" value printed in the log, and set this to 2 / raw.
@@ -206,12 +206,12 @@ def main():
 
 
 def self_check():
-    assert drive_command(0, 0.95)[0] == 0, "holds inside the 85-100 cm band"
-    assert drive_command(0, 0.70)[0] == -BACKUP_SPEED, "backs up when too close"
+    assert drive_command(0, 1.95)[0] == 0, "holds inside the 1.85-2 m band"
+    assert drive_command(0, 1.50)[0] == -BACKUP_SPEED, "backs up when too close"
     assert drive_command(0, None)[0] == 0, "no camera estimate = never drive forward blind"
     assert drive_command(0, 3.0)[0] == MAX_SPEED, "full speed when far"
-    assert MIN_SPEED <= drive_command(0, 1.5)[0] < MAX_SPEED, "slows down when close"
-    assert drive_command(20, 2.5)[0] == 0, "turns before driving when face is off-center"
+    assert MIN_SPEED <= drive_command(0, 2.4)[0] < MAX_SPEED, "slows down when close"
+    assert drive_command(20, 2.9)[0] == 0, "turns before driving when face is off-center"
     assert drive_command(100, None)[1] == MAX_TURN * BEARING_SIGN, "turn is clamped"
     assert estimate_distance(500) == MAX_ESTIMATE, "guesses are capped at 3 m"
     assert estimate_distance(150) == 1.5
