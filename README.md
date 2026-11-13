@@ -1,6 +1,6 @@
 # Misty image recognition
 
-The main program has Misty scan for a face, follow it, and say “Hey!” before taking a picture and sending it directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. No FastAPI server or `robot_image_rec` repo is needed.
+The main program has Misty scan for a face, say “Hey!”, then turn and drive toward the person while keeping eye contact, stopping about 50 cm in front of them (and backing up if they step closer). Once there, it takes a picture and sends it directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. No FastAPI server or `robot_image_rec` repo is needed.
 
 ## 1. Install and start Ollama
 
@@ -75,7 +75,8 @@ The model must be installed in Ollama first. For example, run `ollama pull qwen2
 
 ## Project files
 
-- `main.py` runs the idle scan, face tracking, photo capture, Ollama description, and speech. Run this file.
+- `main.py` runs the idle scan, approach, photo capture, Ollama description, and speech. Run this file.
+- `approach_face.py` turns/drives Misty toward a face and holds ~50 cm using the front distance sensor. Tuning knobs (speeds, stop distance, turn direction) are at the top. Can also run alone: `python .\approach_face.py`.
 - `misty_camera.py` captures the image from Misty and decodes it.
 - `ollama_client.py` sends the image to Ollama and reads the description.
 - `settings.py` contains the Misty IP, Ollama settings, and capture image filename.
@@ -103,6 +104,9 @@ python .\idle_mode.py
 Press `Ctrl+C` to stop.
 
 ## Troubleshooting
+
+- **Misty turns or tilts away from the face:** set `BEARING_SIGN` or `ELEVATION_SIGN` to `-1` in `approach_face.py`.
+- **Misty drives — keep the floor clear and stay close the first few runs.**
 
 - **`ollama` is not recognized:** reinstall Ollama or open a new PowerShell window after installing it.
 - **Connection refused at port 11434:** open the Ollama app, or start `ollama serve` in a separate terminal.
