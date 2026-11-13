@@ -1,6 +1,6 @@
 # Misty image recognition
 
-The main program has Misty scan for a face, say “Hey!”, then turn and drive toward the person while keeping eye contact, stopping about 50 cm in front of them (and backing up if they step closer). Once there, it takes a picture and sends it directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. No FastAPI server or `robot_image_rec` repo is needed.
+The main program has Misty scan for a face, say “Hey!”, then turn and drive toward the person while keeping eye contact, stopping about 1 m in front of them (and backing up if they step closer). Once there, it takes a picture and sends it directly from this PC to Ollama. Ollama returns a specific visible detail, such as “gray shirt” or “curly hair,” and Misty says “I like your [detail].” If no clear detail is found, Misty says nothing further. No FastAPI server or `robot_image_rec` repo is needed.
 
 ## 1. Install and start Ollama
 
@@ -76,7 +76,7 @@ The model must be installed in Ollama first. For example, run `ollama pull qwen2
 ## Project files
 
 - `main.py` runs the idle scan, approach, photo capture, Ollama description, and speech. Run this file.
-- `approach_face.py` turns/drives Misty toward a face and holds ~50 cm using the front distance sensor. Tuning knobs (speeds, stop distance, turn direction) are at the top. Can also run alone: `python .\approach_face.py`.
+- `approach_face.py` turns/drives Misty toward a face and holds ~1 m using the front distance sensor. Tuning knobs (speeds, stop distance, turn direction) are at the top. Can also run alone: `python .\approach_face.py`.
 - `misty_camera.py` captures the image from Misty and decodes it.
 - `ollama_client.py` sends the image to Ollama and reads the description.
 - `settings.py` contains the Misty IP, Ollama settings, and capture image filename.

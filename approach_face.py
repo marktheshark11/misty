@@ -1,4 +1,4 @@
-"""Turn toward a detected face, keep eye contact, and hold ~50 cm from the person.
+"""Turn toward a detected face, keep eye contact, and hold ~1 m from the person.
 
 Body turns to keep the face centered horizontally, the head pitches to keep it centered
 vertically, and the front-center time-of-flight sensor decides when to stop or back up.
@@ -16,9 +16,9 @@ from idle_mode import get_property
 from settings import MISTY_IP
 
 # --- Calibration knobs (tune on the real robot) ---
-STOP_DISTANCE = 0.50   # metres from the front ToF sensor to the person
-BACKUP_DISTANCE = 0.40 # closer than this, Misty reverses back toward STOP_DISTANCE
-SLOW_DISTANCE = 1.00   # start slowing down inside this range
+STOP_DISTANCE = 1.00   # metres from the front ToF sensor to the person
+BACKUP_DISTANCE = 0.90 # closer than this, Misty reverses back toward STOP_DISTANCE
+SLOW_DISTANCE = 1.30   # start slowing down inside this range (~ToF max range)
 MAX_SPEED = 25         # drive linear velocity, % of max. Keep low indoors.
 MIN_SPEED = 8          # below this Misty's wheels tend to stall
 BACKUP_SPEED = 10
@@ -172,10 +172,10 @@ def main():
 
 
 def self_check():
-    assert drive_command(0, 0.45)[0] == 0, "holds inside the 40-50 cm band"
-    assert drive_command(0, 0.30)[0] == -BACKUP_SPEED, "backs up when too close"
+    assert drive_command(0, 0.95)[0] == 0, "holds inside the 90-100 cm band"
+    assert drive_command(0, 0.70)[0] == -BACKUP_SPEED, "backs up when too close"
     assert drive_command(0, None)[0] == MAX_SPEED, "no ToF reading = far away"
-    assert MIN_SPEED <= drive_command(0, 0.75)[0] < MAX_SPEED, "slows down when close"
+    assert MIN_SPEED <= drive_command(0, 1.15)[0] < MAX_SPEED, "slows down when close"
     assert drive_command(20, 2.0)[0] == 0, "turns before driving when face is off-center"
     assert drive_command(100, None)[1] == MAX_TURN * BEARING_SIGN, "turn is clamped"
 
