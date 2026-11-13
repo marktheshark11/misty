@@ -2,20 +2,35 @@
 
 from __future__ import annotations
 
+import socket
 import threading
 import time
 
 import av
 
-# Low-latency RTSP: TCP (no smeared frames from lost UDP packets on Wi-Fi), no input
-# buffering, no reordering delay.
+# Low-latency RTSP: no input buffering, no reordering delay. The probe limits keep
+# FFmpeg's stream analysis (5 s by default) from eating the open timeout.
 RTSP_OPTIONS = {
-    "rtsp_transport": "tcp",
     "fflags": "nobuffer",
     "flags": "low_delay",
     "max_delay": "0",
     "reorder_queue_size": "0",
+    "analyzeduration": "2000000",
+    "probesize": "1000000",
 }
+# TCP avoids smeared frames from lost packets on Wi-Fi; UDP is tried as a fallback in
+# case Misty's RTSP server or a firewall doesn't cooperate with TCP.
+RTSP_TRANSPORTS = ("tcp", "udp")
+OPEN_TIMEOUT = 20.0  # Misty's encoder can take several seconds to emit its first keyframe.
+READ_TIMEOUT = 5.0
+
+
+def port_is_open(host: str, port: int, timeout: float = 3.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def _check(response, what: str) -> None:
@@ -31,6 +46,10 @@ def _check(response, what: str) -> None:
 def start_misty_stream(misty, port: int, width: int, height: int, fps: int, bitrate: int) -> None:
     """Switch Misty from on-board vision to RTSP streaming (Misty hosts the server)."""
     _check(misty.enable_av_streaming_service(), "Enabling the AV streaming service")
+    try:
+        misty.stop_av_streaming()  # Clear a stream left running by a crashed earlier run.
+    except Exception:
+        pass
     try:
         _check(
             misty.start_av_streaming(
@@ -83,15 +102,25 @@ class LatestFrameReader:
 
     def _run(self) -> None:
         backoff = 0.5
+        attempt = 0
         while self._running:
+            is_rtsp = self.url.startswith("rtsp://")
+            transport = RTSP_TRANSPORTS[attempt % len(RTSP_TRANSPORTS)]
+            attempt += 1
+            options = dict(RTSP_OPTIONS, rtsp_transport=transport) if is_rtsp else {}
+            if is_rtsp:
+                print(f"Connecting to {self.url} over {transport.upper()}...")
             try:
-                options = RTSP_OPTIONS if self.url.startswith("rtsp://") else {}
-                with av.open(self.url, options=options, timeout=5.0) as container:
+                with av.open(self.url, options=options,
+                             timeout=(OPEN_TIMEOUT, READ_TIMEOUT)) as container:
                     stream = container.streams.video[0]
                     # Frame threading buffers several frames inside the decoder; slice
                     # threading doesn't. That alone can save 100+ ms at 30 fps.
                     stream.codec_context.thread_type = "SLICE"
                     backoff = 0.5
+                    attempt -= 1  # Keep using the transport that worked.
+                    if is_rtsp:
+                        print(f"Video connected over {transport.upper()}.")
                     for frame in container.decode(stream):
                         if not self._running:
                             return
@@ -106,7 +135,7 @@ class LatestFrameReader:
                     print("Video stream ended; reconnecting...")
             except (av.error.FFmpegError, OSError) as error:
                 if self._running:
-                    print(f"Video stream unavailable ({error}); retrying...")
+                    print(f"Video stream unavailable over {transport.upper()} ({error}); retrying...")
             time.sleep(backoff)
             backoff = min(backoff * 2, 3.0)
 

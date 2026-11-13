@@ -14,12 +14,18 @@ import concurrent.futures
 import time
 
 import cv2
+
+try:  # Errors only; hides harmless DNN backend warnings.
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+except AttributeError:
+    pass
 from mistyPy.Robot import Robot
 
 from face_models import model_path
 from face_tracker import COASTING, SEARCHING, TRACKING, FaceTracker, TrackerConfig
 from head_controller import HeadController, HeadPose
-from misty_stream import LatestFrameReader, start_misty_stream, stop_misty_stream
+from misty_stream import (LatestFrameReader, port_is_open, start_misty_stream,
+                          stop_misty_stream)
 from ollama_client import describe_image
 from settings import (CAMERA_HFOV, MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_HEIGHT,
                       STREAM_LATENCY, STREAM_PORT, STREAM_WIDTH)
@@ -86,16 +92,27 @@ def main():
         print("Starting Misty's video stream (on-board vision is paused while streaming)...")
         start_misty_stream(misty, STREAM_PORT, STREAM_WIDTH, STREAM_HEIGHT,
                            STREAM_FPS, STREAM_BITRATE)
+        # Misty's RTSP server takes a moment to come up after the start command.
+        port_deadline = time.monotonic() + 15
+        while not port_is_open(MISTY_IP, STREAM_PORT):
+            if time.monotonic() > port_deadline:
+                raise RuntimeError(
+                    f"Misty accepted the stream command, but nothing is listening on "
+                    f"{MISTY_IP}:{STREAM_PORT}. Try restarting Misty, or set MISTY_STREAM_PORT "
+                    f"to another port (e.g. 1935).")
+            time.sleep(0.5)
         reader = LatestFrameReader(f"rtsp://{MISTY_IP}:{STREAM_PORT}")
 
         pose = HeadPose(misty, start_yaw=0.0, start_pitch=NEUTRAL_PITCH)
         head = HeadController(MISTY_IP, pose, 0.0, NEUTRAL_PITCH, lead_time=STREAM_LATENCY)
 
         print("Waiting for video...")
-        seq, deadline = 0, time.monotonic() + 20
+        seq, deadline = 0, time.monotonic() + 75  # Allows a full TCP and a UDP attempt.
         while reader.wait_for_frame(seq, timeout=1.0) is None:
             if time.monotonic() > deadline:
-                raise RuntimeError(f"No video from rtsp://{MISTY_IP}:{STREAM_PORT}")
+                raise RuntimeError(
+                    f"Port {STREAM_PORT} on Misty is open, but no video arrived over TCP or UDP. "
+                    f"If you're on Windows, allow Python through the firewall for UDP.")
         print("Tracking. Press Ctrl+C to stop" + (" (or q in the preview)." if args.preview else "."))
 
         stats_time, stats_frames, stats_proc = time.monotonic(), 0, 0.0
