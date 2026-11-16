@@ -110,6 +110,25 @@ python .\follow_face.py
 
 Place one face in front of Misty in a well-lit area. Press `Ctrl+C` to stop. The program sends `STOP-FOLLOW` and removes the temporary actions it created. Keep Misty supervised while trying the behavior.
 
+## Laptop face detection
+
+By default, `main.py` and `approach_face.py` detect faces on this computer, not on Misty. `stream_faces.py` streams Misty's camera over RTSP and runs OpenCV's YuNet detector here. It detects faces only and does not identify anyone, and it is much faster and steadier than Misty's built-in detector. It needs `python -m pip install opencv-python` and downloads the ~230 KB model on its first run. While a behaviour runs, Misty's own camera service is off, and the greeting photo comes from the stream. The camera is turned back on when the behaviour stops (the control panel's Stop does this too). To go back to Misty's built-in detection, set `FACE_SOURCE=misty`. `idle_mode.py` and `follow_face.py` always use Misty's built-in detection, because they rely on its `FOLLOW-FACE` action.
+
+To watch what the detector sees, run the viewer on its own (not while a behaviour is running):
+
+```powershell
+python .\stream_faces.py           # Misty at MISTY_IP
+python .\stream_faces.py --webcam  # try it with this computer's camera
+```
+
+Misty sticks to one face. It starts with the biggest face, then keeps following that same face as it moves, even if someone else comes closer. It only picks a new face after the followed one has been gone for `LOCK_TIMEOUT` (0.7 s). In the viewer, the followed face is red, with its distance and bearing estimate, and ignored faces are grey. Knobs at the top of `stream_faces.py`:
+- **`ROTATE`:** set it if the picture comes out sideways.
+- **`SCORE_THRESHOLD`:** raise it if it finds faces that aren't there.
+- **`FACE_WIDTH_CM`:** change it if distances are off. Stand 2 m away and multiply it by 2 / shown distance. Alternatively, use the panel's `FACE_DISTANCE_SCALE` as before.
+- **`CAMERA_HFOV`:** change it if Misty over- or under-turns toward faces.
+- **`MAX_JUMP`:** raise it if Misty loses the person when they move fast. Lower it if focus jumps to someone standing right next to them.
+- **`LOCK_TIMEOUT`:** raise it if Misty switches to someone else when the person briefly turns away.
+
 ## Run idle mode
 
 `idle_mode.py` runs on its own. Misty slowly looks up and down, then a little left and right. When it detects a face, it says “Hello” and uses its built-in face tracking to follow it. When the face is no longer visible, it returns to the idle scan. With the Python virtual environment active and `MISTY_IP` set, run:
@@ -123,7 +142,8 @@ Press `Ctrl+C` to stop.
 ## Troubleshooting
 
 - **Misty stops too early or too late:** stand exactly 2 m away, read the `raw` value in the `Camera distance estimate` log line, and set `FACE_DISTANCE_SCALE = 2 / raw` in `approach_face.py`.
-- **Misty turns or tilts away from the face:** set `BEARING_SIGN` or `ELEVATION_SIGN` to `-1` in `approach_face.py`.
+- **Misty turns or tilts away from the face:** set `BEARING_SIGN` or `ELEVATION_SIGN` to `-1` in `approach_face.py`. If the head turns the wrong way sideways, set `YAW_SIGN` to `-1`.
+- **Misty sways side to side around the person:** the head turns first and the body follows, which only works when `VIDEO_LAG` matches the camera stream's real delay. Try 0.4–0.5 on slow Wi-Fi, 0.2 on fast Wi-Fi. If no value works, lower `YAW_GAIN` and `TURN_GAIN`.
 - **Misty drives — keep the floor clear and stay close the first few runs.**
 
 - **`ollama` is not recognized:** reinstall Ollama or open a new PowerShell window after installing it.

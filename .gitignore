@@ -13,3 +13,4 @@ misty-python-sdk/.sdk-git-backup/
 misty_capture.*
 knobs.json
 ui_config.json
+face_detection_yunet_*.onnx

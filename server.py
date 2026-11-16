@@ -108,7 +108,9 @@ def stop_behaviour():
             p.kill()
             p.wait()
     # Make the robot safe regardless; each call is independent.
-    for path, body in [("drive/stop", None), ("faces/detection/stop", None),
+    # The avstreaming/camera calls give Misty its camera back if a laptop-faces run was killed.
+    for path, body in [("drive/stop", None), ("faces/detection/stop", None), ("avstreaming/stop", None),
+                       ("services/avstreaming/disable", None), ("services/camera/enable", None),
                        ("head", {"pitch": -15, "roll": 0, "yaw": 0, "velocity": 40, "units": "degrees"})]:
         try:
             requests.post(f"http://{MISTY_IP}/api/{path}", json=body, timeout=2)

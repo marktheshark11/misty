@@ -18,7 +18,6 @@ from idle_mode import (
     YAW_POSITIONS,
     get_property,
 )
-from misty_camera import take_picture
 from ollama_client import describe_person
 from settings import MISTY_IP
 
@@ -42,7 +41,6 @@ def main() -> None:
     head_petted = threading.Event()
     shutting_down = threading.Event()
     speech_event_index = [0]
-    detection_started = False
     tracking_started = False
     description_attempted = False
     known_names = load_names()
@@ -118,7 +116,7 @@ def main() -> None:
         # Runs in a thread so Misty keeps holding distance during capture and speech.
         try:
             print("Taking a picture, waving, and greeting the person...")
-            photo = take_picture(misty)
+            photo = approach.photo()
             wave()
             speak_and_wait("Hi, I'm Misty!")
             name = "human"
@@ -145,8 +143,7 @@ def main() -> None:
             callback_function=on_touch_event,
         )
         time.sleep(0.5)
-        misty.start_face_detection().raise_for_status()
-        detection_started = True
+        approach.start_faces()
 
         print("Idle scan is running. Press Ctrl+C to stop.")
         while True:
@@ -154,7 +151,7 @@ def main() -> None:
                 set_face_eyes(True)
                 if not tracking_started:
                     print("Face detected; approaching.")
-                    approach.face_forward(PITCH_POSITIONS[pitch_index])
+                    approach.face_forward(PITCH_POSITIONS[pitch_index], YAW_POSITIONS[yaw_index])
                     tracking_started = True
 
                 arrived = approach.step()
@@ -195,7 +192,7 @@ def main() -> None:
             while time.monotonic() < deadline and not face_seen_recently():
                 time.sleep(0.1)
             if face_seen_recently():
-                continue  # keep pitch_index so face_forward uses the pitch that found the face
+                continue  # keep the indexes so face_forward starts from the pose that found the face
             pitch_index = (pitch_index + 1) % len(PITCH_POSITIONS)
             if pitch_index == 0:
                 yaw_index = (yaw_index + 1) % len(YAW_POSITIONS)
@@ -207,11 +204,7 @@ def main() -> None:
             misty.stop()
         except Exception as error:
             print(f"Could not stop driving: {error}")
-        if detection_started:
-            try:
-                misty.stop_face_detection().raise_for_status()
-            except Exception as error:
-                print(f"Could not stop face detection cleanly: {error}")
+        approach.stop_faces()
         misty.unregister_all_events()
         try:
             misty.move_head(

@@ -8,6 +8,7 @@ the person. If it sees no face it backs away and forgets the face so the caller 
 again. Used by main.py; can also be run on its own.
 """
 
+import collections
 import json
 import os
 import threading
@@ -18,7 +19,8 @@ from mistyPy.Events import Events
 from mistyPy.Robot import Robot
 
 from idle_mode import get_property
-from settings import MISTY_IP
+from misty_camera import take_picture
+from settings import FACE_SOURCE, MISTY_IP
 
 # --- Calibration knobs (tune on the real robot) ---
 STOP_DISTANCE = 2.00   # metres from the camera to the person's face
@@ -38,6 +40,10 @@ BEARING_SIGN = 1       # flip to -1 if Misty turns away from the face
 PITCH_GAIN = 0.4       # head pitch degrees per degree of face elevation, per update
 ELEVATION_SIGN = 1     # flip to -1 if the head tilts away from the face
 PITCH_LIMITS = (-40, 25)  # negative pitch = head up
+YAW_GAIN = 0.5         # 0-1; how far the head moves toward the face per update (head leads)
+YAW_SIGN = 1           # flip to -1 if the head turns away from the face sideways
+YAW_LIMITS = (-60, 60) # degrees; the body turns to bring the head back toward centre
+VIDEO_LAG = 0.3        # seconds the face picture runs behind the head; raise if Misty wobbles side to side
 START_PITCH = -15
 FACE_LOST_AFTER = 1.0  # seconds without a face event before the wheels stop
 DISTANCE_LOG_EVERY = 2.0
@@ -66,6 +72,20 @@ def estimate_distance(raw, previous=None):
     return previous + DISTANCE_SMOOTHING * (metres - previous)
 
 
+def next_head(pitch, yaw, elevation, to_body):
+    """Move the head toward the face: pitch nudged by elevation, yaw part-way to the face's
+    direction relative to the body. A target, not a nudge, so a stale frame can't overshoot."""
+    new_pitch = pitch + ELEVATION_SIGN * PITCH_GAIN * elevation
+    new_yaw = yaw + YAW_GAIN * (YAW_SIGN * to_body - yaw)
+    return (max(PITCH_LIMITS[0], min(PITCH_LIMITS[1], new_pitch)),
+            max(YAW_LIMITS[0], min(YAW_LIMITS[1], new_yaw)))
+
+
+def body_bearing(head_yaw, bearing):
+    """Face direction relative to the body: where the head points plus where the face is in the picture."""
+    return YAW_SIGN * head_yaw + bearing
+
+
 def too_close(obstacle):
     """True when a fresh front ToF reading says something is right in front."""
     return obstacle is not None and obstacle <= OBSTACLE_DISTANCE
@@ -91,15 +111,18 @@ def drive_command(bearing, distance):
 
 
 class FaceApproach:
-    """Face event state plus one control step. Caller starts face detection."""
+    """Face event state plus one control step. Caller calls start_faces() after register()."""
 
     def __init__(self, misty):
         self.misty = misty
+        self.laptop_faces = None
         self.lock = threading.Lock()
         self.face = {"bearing": 0.0, "elevation": 0.0, "distance": None, "raw": None, "seen": 0.0}
         self.tof = {}  # front sensor position -> (metres, time seen)
         self.last_distance_log = 0.0
         self.pitch = START_PITCH
+        self.yaw = 0.0                # last commanded head yaw
+        self.head_yaw = collections.deque(maxlen=50)  # (time, measured degrees) from ActuatorPosition
         self.driving = False
         self.person_blocking = False
 
@@ -122,13 +145,47 @@ class FaceApproach:
                 callback_function=self._tof_callback(name),
             )
         self.misty.register_event(
-            Events.FaceRecognition,
-            "ApproachFace",
+            Events.ActuatorPosition,
+            "ApproachHeadYaw",
+            condition=[EventFilters.ActuatorPosition.HeadYaw],
+            debounce=100,
             keep_alive=True,
-            # The SDK checks the raw argument count, which includes `self` on
-            # bound methods. A one-argument wrapper matches its callback API.
-            callback_function=lambda event: self._on_face(event),
+            callback_function=lambda event: self._on_head_yaw(event),
         )
+        if FACE_SOURCE != "laptop":
+            self.misty.register_event(
+                Events.FaceRecognition,
+                "ApproachFace",
+                keep_alive=True,
+                # The SDK checks the raw argument count, which includes `self` on
+                # bound methods. A one-argument wrapper matches its callback API.
+                callback_function=lambda event: self._on_face(event),
+            )
+
+    def start_faces(self):
+        """Start face detection: on this computer (default) or on Misty."""
+        if FACE_SOURCE == "laptop":
+            from stream_faces import LaptopFaces  # needs opencv-python
+
+            self.laptop_faces = LaptopFaces(self.misty, self._on_face)
+            self.laptop_faces.start()
+        else:
+            self.misty.start_face_detection().raise_for_status()
+
+    def stop_faces(self):
+        """Stop face detection; with the laptop source this also gives Misty its camera back."""
+        try:
+            if self.laptop_faces:
+                self.laptop_faces.stop()
+                self.laptop_faces = None
+            else:
+                self.misty.stop_face_detection()
+        except Exception as error:
+            print(f"Could not stop face detection cleanly: {error}")
+
+    def photo(self):
+        """JPEG of what Misty sees. Misty's camera service is off while the laptop stream runs."""
+        return self.laptop_faces.photo() if self.laptop_faces else take_picture(self.misty)
 
     def _tof_callback(self, name):
         # The SDK only accepts callbacks that take exactly one argument.
@@ -144,6 +201,21 @@ class FaceApproach:
             with self.lock:
                 self.tof[name] = (float(metres), time.monotonic())
 
+    def _on_head_yaw(self, event):
+        value = get_property(get_property(event, "message", {}), "value")
+        if value is not None:
+            with self.lock:
+                self.head_yaw.append((time.monotonic(), float(value)))
+
+    def _yaw_at(self, when):
+        """Where the head pointed at `when`, from readings; the last command if there are none."""
+        with self.lock:
+            readings = list(self.head_yaw)
+        if not readings or time.monotonic() - readings[-1][0] > 0.5:
+            return self.yaw
+        before = [yaw for t, yaw in readings if t <= when]
+        return before[-1] if before else readings[0][1]
+
     def _front_obstacle(self, now):
         """Nearest fresh front ToF reading in metres, or None when nothing is in range."""
         with self.lock:
@@ -154,7 +226,7 @@ class FaceApproach:
         """Tilt the head right up; True if a face shows up (the person is the obstacle)."""
         print("Something is right in front; looking up to check whether it is the person.")
         started = time.monotonic()
-        self.pitch = PITCH_LIMITS[0]
+        self.pitch, self.yaw = PITCH_LIMITS[0], 0.0
         self.misty.move_head(pitch=self.pitch, roll=0, yaw=0, duration=0.5, units="degrees")
         while time.monotonic() - started < LOOK_UP_TIME:
             with self.lock:
@@ -193,12 +265,10 @@ class FaceApproach:
         with self.lock:
             return time.monotonic() - self.face["seen"]
 
-    def face_forward(self, pitch):
-        """Center the head yaw so body turning lines up with the camera."""
-        # ponytail: snapping yaw to 0 can push a face at the frame edge out of view;
-        # compensate with head-yaw + bearing if that happens a lot.
-        self.pitch = pitch
-        self.misty.move_head(pitch=pitch, roll=0, yaw=0, duration=0.5, units="degrees")
+    def face_forward(self, pitch, yaw=0):
+        """Start tracking from this head pose. Keep the yaw that found the face so it stays in view."""
+        self.pitch, self.yaw = pitch, float(yaw)
+        self.misty.move_head(pitch=pitch, roll=0, yaw=yaw, duration=0.5, units="degrees")
 
     def halt(self):
         if self.driving:
@@ -214,12 +284,20 @@ class FaceApproach:
         with self.lock:
             face_visible = now - self.face["seen"] <= FACE_LOST_AFTER
             bearing, elevation = self.face["bearing"], self.face["elevation"]
+            frame_time = self.face["seen"] - VIDEO_LAG
             distance, raw = self.face["distance"], self.face["raw"]
             if not face_visible:
                 # Forget the old guess so a new face starts from its own estimate.
                 self.face["distance"] = None
 
-        linear, angular = drive_command(bearing, distance) if face_visible else (0, 0)
+        # The head follows the face first; the body turns to where the face is relative
+        # to the body, which brings the head back toward centre as it goes. The frame is
+        # VIDEO_LAG old, so pair it with where the head pointed when it was taken.
+        # ponytail: body rotation during the lag is ignored (the body turns slowly);
+        # head pitch still nudges from stale frames, give it the same treatment if it bobs.
+        head_yaw = self._yaw_at(frame_time)
+        to_body = body_bearing(head_yaw, bearing)
+        linear, angular = drive_command(to_body, distance) if face_visible else (0, 0)
         close = too_close(self._front_obstacle(now))
         if not close:
             self.person_blocking = False
@@ -239,18 +317,18 @@ class FaceApproach:
         if close and linear > 0:
             linear = 0  # the person is right in front: don't push into them
 
-        # Keep eyeline: nudge head pitch toward the face's vertical offset.
-        new_pitch = self.pitch + ELEVATION_SIGN * PITCH_GAIN * elevation
-        new_pitch = max(PITCH_LIMITS[0], min(PITCH_LIMITS[1], new_pitch))
-        if abs(new_pitch - self.pitch) >= 1:
-            self.pitch = new_pitch
-            self.misty.move_head(pitch=new_pitch, roll=0, yaw=0, duration=0.3, units="degrees")
+        # Keep eye contact: nudge the head toward the face, up/down and sideways.
+        new_pitch, new_yaw = next_head(self.pitch, self.yaw, elevation, to_body)
+        if abs(new_pitch - self.pitch) >= 1 or abs(new_yaw - self.yaw) >= 1:
+            self.pitch, self.yaw = new_pitch, new_yaw
+            self.misty.move_head(pitch=new_pitch, roll=0, yaw=new_yaw, duration=0.3, units="degrees")
 
         if now - self.last_distance_log >= DISTANCE_LOG_EVERY:
             self.last_distance_log = now
             shown = "unknown" if distance is None else f"{distance:.2f} m"
             print(
                 f"Camera distance estimate: {shown} (raw {raw}), bearing {bearing:.0f}°, "
+                f"head yaw {head_yaw:.0f}°, face vs body {to_body:.0f}°, "
                 f"drive linear {linear:.0f} angular {angular:.0f}"
             )
         if linear == 0 and abs(angular) < 3:
@@ -265,13 +343,11 @@ class FaceApproach:
 def main():
     misty = Robot(MISTY_IP)
     approach = FaceApproach(misty)
-    detection_started = False
     try:
         approach.face_forward(START_PITCH)
         approach.register()
         time.sleep(0.5)
-        misty.start_face_detection().raise_for_status()
-        detection_started = True
+        approach.start_faces()
         print("Looking for a face. Press Ctrl+C to stop.")
         while True:
             approach.step()
@@ -283,11 +359,7 @@ def main():
             misty.stop()
         except Exception as error:
             print(f"Could not stop driving: {error}")
-        if detection_started:
-            try:
-                misty.stop_face_detection()
-            except Exception as error:
-                print(f"Could not stop face detection: {error}")
+        approach.stop_faces()
         misty.unregister_all_events()
 
 
@@ -301,6 +373,11 @@ def self_check():
     assert drive_command(100, None)[1] == MAX_TURN * BEARING_SIGN, "turn is clamped"
     assert too_close(0.20) and not too_close(1.0), "collision stop only right in front"
     assert not too_close(None), "no ToF reading = nothing in front"
+    assert next_head(0, 0, 0, 10)[1] == YAW_SIGN * YAW_GAIN * 10, "head turns toward the face first"
+    assert next_head(0, 20, 0, 20)[1] == 20, "head already on the face: a repeated stale frame doesn't push it further"
+    assert next_head(0, 60, 0, 200)[1] == YAW_LIMITS[1], "head yaw is clamped"
+    assert body_bearing(30, -5) == YAW_SIGN * 30 - 5, "body aims at head direction + picture offset"
+    assert drive_command(body_bearing(0, 2), None)[1] == drive_command(2, None)[1], "head centred = old behaviour"
     assert estimate_distance(500) == MAX_ESTIMATE, "guesses are capped at 3 m"
     assert estimate_distance(150) == 1.5
     assert 2.0 < estimate_distance(100, previous=3.0) < 3.0, "smoothing moves part-way"
