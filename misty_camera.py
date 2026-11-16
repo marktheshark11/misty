@@ -1,7 +1,7 @@
 import base64
 import time
 
-CAMERA_IMAGE = "e_System_camera.jpg"
+CAMERA_IMAGE = "e_SystemCamera.jpg"
 AFTER_PHOTO_IMAGE = "e_DefaultContent.jpg"
 
 
