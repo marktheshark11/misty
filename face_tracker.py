@@ -6,8 +6,9 @@ where the target is predicted to be *and* doesn't look like someone else, or if 
 matches the target's embedding. When the target is briefly lost, the tracker coasts
 on its motion estimate and then waits for that same person before picking anyone new.
 
-Faces are tracked as world angles (head pose at capture time + angle within the
-image), so head motion and stream latency don't disturb the association.
+Positions are angles in degrees. Callers that pass head angles of 0 (as face_session
+does) get angles from the centre of the picture: positive yaw means the face is to
+Misty's left of centre, positive pitch means below centre.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ SEARCHING, TRACKING, COASTING, REACQUIRING = "searching", "tracking", "coasting"
 
 @dataclass
 class TrackerConfig:
-    hfov_deg: float = 70.0          # Horizontal field of view of the streamed image.
+    hfov_deg: float = 70.0          # Field of view across the longer side of the image.
     score_threshold: float = 0.7    # YuNet detection confidence.
     min_face_px: int = 24           # Ignore tiny faces (far away / false positives).
     min_face_px_for_id: int = 40    # Below this, embeddings are unreliable.
@@ -37,8 +38,9 @@ class TrackerConfig:
     reacquire_time: float = 3.0     # Then wait this long for the *same* person.
     confirm_frames: int = 2         # Frames a new face must persist before locking on.
     id_check_frames: int = 4        # Re-verify a lone target's identity this often.
-    alpha: float = 0.55             # Alpha-beta filter gains.
-    beta: float = 0.12
+    alpha: float = 0.8              # Position smoothing (1 = raw detections).
+    beta: float = 0.0               # Velocity gain; 0 because in image space the head's
+                                    # own motion would be mistaken for the face moving.
 
 
 @dataclass
@@ -95,7 +97,7 @@ class FaceTracker:
     # ----- geometry ----------------------------------------------------------------------
     def _to_world(self, row, shape, head_yaw, head_pitch):
         h, w = shape[:2]
-        fx = (w / 2.0) / math.tan(math.radians(self.cfg.hfov_deg) / 2.0)
+        fx = (max(w, h) / 2.0) / math.tan(math.radians(self.cfg.hfov_deg) / 2.0)
         cx = row[0] + row[2] / 2.0
         cy = row[1] + row[3] / 2.0
         ax = math.degrees(math.atan((cx - w / 2.0) / fx))
@@ -104,7 +106,7 @@ class FaceTracker:
         return head_yaw - ax, head_pitch + ay
 
     def _angular_width(self, width_px, image_w):
-        return width_px / image_w * self.cfg.hfov_deg
+        return width_px / image_w * self.cfg.hfov_deg  # Rough; only widens the gate.
 
     # ----- appearance --------------------------------------------------------------------
     def _feature(self, frame, face: Face):

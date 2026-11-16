@@ -13,13 +13,24 @@ CAPTURE_FILE = "misty_capture.jpg"
 STREAM_PORT = int(os.getenv("MISTY_STREAM_PORT", "1936"))
 STREAM_WIDTH = int(os.getenv("MISTY_STREAM_WIDTH", "640"))
 STREAM_HEIGHT = int(os.getenv("MISTY_STREAM_HEIGHT", "480"))
-STREAM_FPS = int(os.getenv("MISTY_STREAM_FPS", "30"))
+# Misty's docs: the frame rate must be "greater than 1 and less than 30".
+STREAM_FPS = int(os.getenv("MISTY_STREAM_FPS", "24"))
 STREAM_BITRATE = int(os.getenv("MISTY_STREAM_BITRATE", "1500000"))
-# Seconds between Misty capturing a frame and this PC decoding it. Used to look up
-# where the head was pointing when the frame was taken. Typical Wi-Fi: 0.15-0.35.
-STREAM_LATENCY = float(os.getenv("MISTY_STREAM_LATENCY", "0.25"))
-# Horizontal field of view of the streamed image, in degrees.
-CAMERA_HFOV = float(os.getenv("MISTY_CAMERA_HFOV", "70"))
-# Head speed in degrees/second at full velocity. Only used to estimate head position when
-# Misty isn't reporting it; erring low is safe (slower convergence, no runaway).
-HEAD_MAX_SPEED = float(os.getenv("MISTY_HEAD_SPEED", "30"))
+# "tcp" or "udp": which RTSP transport to try first (the other is the fallback).
+STREAM_TRANSPORT = os.getenv("MISTY_STREAM_TRANSPORT", "tcp").lower()
+if STREAM_TRANSPORT not in ("tcp", "udp"):
+    raise RuntimeError("MISTY_STREAM_TRANSPORT must be tcp or udp.")
+# Degrees to turn each frame clockwise so people are upright: 0, 90, 180, 270, or
+# "auto" to work it out from the first faces seen. Misty's docs say the stream arrives
+# rotated 90 degrees counterclockwise, which would make this 90.
+STREAM_ROTATE = os.getenv("MISTY_STREAM_ROTATE", "auto").lower()
+if STREAM_ROTATE not in ("auto", "0", "90", "180", "270"):
+    raise RuntimeError("MISTY_STREAM_ROTATE must be auto, 0, 90, 180 or 270.")
+# Field of view across the longer side of the streamed image, in degrees. Only scales
+# how strongly the head reacts; it doesn't need to be exact.
+CAMERA_FOV = float(os.getenv("MISTY_CAMERA_FOV", "70"))
+# Fraction of the face's distance from the image centre that the head corrects per
+# second. Higher is snappier; too high and the head swings back and forth.
+TRACK_GAIN = float(os.getenv("MISTY_TRACK_GAIN", "1.5"))
+# Head velocity (percent of maximum) used for tracking moves.
+HEAD_VELOCITY = float(os.getenv("MISTY_HEAD_VELOCITY", "60"))

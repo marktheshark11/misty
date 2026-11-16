@@ -1,9 +1,10 @@
 """Shared PC-side face-following session used by main.py, idle_mode.py and follow_face.py.
 
 Misty streams its camera over RTSP; this PC detects faces (YuNet), keeps a lock on one
-person by appearance (SFace), and drives Misty's head. While a session is open, Misty's
-own camera features (TakePicture, on-board face detection) are unavailable, so use
-`jpeg()` for pictures instead.
+person by appearance (SFace), and nudges Misty's head so that face moves to the centre
+of the picture (plain image-error feedback, see head_controller.py). While a session is
+open, Misty's own camera features (TakePicture, on-board face detection) are
+unavailable, so use `jpeg()` for pictures instead.
 
 Typical use:
 
@@ -26,17 +27,21 @@ except AttributeError:
     pass
 
 from face_models import model_path
-from face_tracker import COASTING, SEARCHING, TRACKING, FaceTracker, TrackerConfig
-from head_controller import HeadController, HeadPose
+from face_tracker import COASTING, SEARCHING, TRACKING, FaceTracker, TrackerConfig, TrackResult
+from head_controller import HeadController
 from misty_stream import (LatestFrameReader, port_is_open, start_misty_stream,
                           stop_misty_stream)
-from settings import (CAMERA_HFOV, HEAD_MAX_SPEED, MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_HEIGHT,
-                      STREAM_LATENCY, STREAM_PORT, STREAM_WIDTH)
+from settings import (CAMERA_FOV, HEAD_VELOCITY, MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_HEIGHT,
+                      STREAM_PORT, STREAM_ROTATE, STREAM_TRANSPORT, STREAM_WIDTH, TRACK_GAIN)
 
 NEUTRAL_PITCH = -15  # Negative pitch tilts Misty's head upward.
 IDLE_IMAGE = "e_defaultcontent.jpg"
 FACE_IMAGE = "e_joy.jpg"
 _STATE_COLORS = {TRACKING: (0, 200, 0), COASTING: (0, 200, 255)}
+# Clockwise rotation (degrees) -> OpenCV rotate code.
+_ROTATIONS = {0: None, 90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+              270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+_ORIENTATION_VOTES = 5
 
 
 class StopRequested(Exception):
@@ -53,10 +58,14 @@ class FaceSession:
         self.misty = misty
         self.preview = preview
         self.tracker = FaceTracker(model_path("detector"), model_path("recognizer"),
-                                   TrackerConfig(hfov_deg=CAMERA_HFOV))
+                                   TrackerConfig(hfov_deg=CAMERA_FOV))
         self.result = None
         self._commands = concurrent.futures.ThreadPoolExecutor(max_workers=1)  # Eyes.
-        self._reader = self._head = self._pose = None
+        self._reader = self._head = None
+        # Clockwise degrees to turn each frame upright; None until worked out ("auto").
+        self._rotation = None if STREAM_ROTATE == "auto" else int(STREAM_ROTATE)
+        self._votes = dict.fromkeys(_ROTATIONS, 0)
+        self._last_tracked = 0.0
         self._eyes_show_face = None
         self._frame = None
         self._seq = 0
@@ -93,11 +102,9 @@ class FaceSession:
                     f"{MISTY_IP}:{STREAM_PORT}. Try restarting Misty, or set MISTY_STREAM_PORT "
                     f"to another port (e.g. 1935).")
             time.sleep(0.5)
-        self._reader = LatestFrameReader(f"rtsp://{MISTY_IP}:{STREAM_PORT}")
-
-        self._pose = HeadPose(misty, start_yaw=0.0, start_pitch=NEUTRAL_PITCH)
-        self._head = HeadController(MISTY_IP, self._pose, 0.0, NEUTRAL_PITCH,
-                                    lead_time=STREAM_LATENCY, max_speed_dps=HEAD_MAX_SPEED)
+        self._reader = LatestFrameReader(f"rtsp://{MISTY_IP}:{STREAM_PORT}", STREAM_TRANSPORT)
+        self._head = HeadController(MISTY_IP, 0.0, NEUTRAL_PITCH, gain=TRACK_GAIN,
+                                    velocity=HEAD_VELOCITY)
 
         print("Waiting for video...")
         deadline = time.monotonic() + 75  # Allows a full TCP and a UDP attempt.
@@ -114,7 +121,6 @@ class FaceSession:
         if self._reader is not None:
             self._reader.close()
         stop_misty_stream(self.misty)
-        self.misty.unregister_all_events()
         self._commands.shutdown(wait=True)
         for call, what in (
             (lambda: self.misty.move_head(pitch=NEUTRAL_PITCH, roll=0, yaw=0, duration=1.0,
@@ -133,19 +139,26 @@ class FaceSession:
         """Process the newest frame. Returns the TrackResult, or None if no frame arrived."""
         item = self._reader.wait_for_frame(self._seq, timeout=timeout)
         if item is None:
-            self._head.clear_target()
             return None
         frame, received, self._seq = item
         started = time.monotonic()
 
-        captured = received - STREAM_LATENCY
-        head_yaw, head_pitch = self._pose.at(captured)
-        result = self.tracker.update(frame, head_yaw, head_pitch, t=captured,
-                                     pose_uncertainty=self._pose.uncertainty(captured))
-        if result.state == SEARCHING:
-            self._head.clear_target()
+        if self._rotation is None:
+            result = self._find_orientation(frame)
         else:
-            self._head.set_target(result.yaw, result.pitch, result.vel_yaw, result.vel_pitch)
+            code = _ROTATIONS[self._rotation]
+            if code is not None:
+                frame = cv2.rotate(frame, code)
+            # Head angles are passed as 0, so the result is the face's angle from the
+            # centre of the picture: exactly the error the head has to remove.
+            result = self.tracker.update(frame, 0.0, 0.0, t=received)
+        if result.state == SEARCHING:
+            self._head.release()
+        elif result.target is not None:
+            # Only frames where the face was really seen move the head; while coasting
+            # or waiting for the person to reappear, the head simply holds still.
+            self._head.track(result.yaw, result.pitch, received - self._last_tracked)
+            self._last_tracked = received
         self.set_eyes(is_following(result))
         self._frame, self.result = frame, result
 
@@ -153,6 +166,25 @@ class FaceSession:
         if self.preview and self._draw_preview(frame, result) == ord("q"):
             raise StopRequested()
         return result
+
+    def _find_orientation(self, frame) -> TrackResult:
+        """Work out which way up the stream is: Misty's docs say it arrives rotated 90
+        degrees counterclockwise, but that is cheap to check rather than assume. The
+        face detector only fires confidently on upright faces, so the rotation that
+        keeps giving the best face wins."""
+        best_score, best_rotation = 0.0, None
+        for rotation, code in _ROTATIONS.items():
+            turned = frame if code is None else cv2.rotate(frame, code)
+            for face in self.tracker.detect(turned, 0.0, 0.0):
+                if face.row[14] > best_score:
+                    best_score, best_rotation = float(face.row[14]), rotation
+        if best_rotation is not None:
+            self._votes[best_rotation] += 1
+            if self._votes[best_rotation] >= _ORIENTATION_VOTES:
+                self._rotation = best_rotation
+                print(f"Stream orientation: rotating frames {best_rotation} degrees clockwise "
+                      f"(set MISTY_STREAM_ROTATE={best_rotation} to skip this check).")
+        return TrackResult(SEARCHING)
 
     def jpeg(self, quality: int = 85) -> bytes:
         """The most recently processed frame as JPEG (replaces take_picture while streaming)."""
@@ -180,13 +212,12 @@ class FaceSession:
         if now - stats[0] >= 5.0:
             self._fps = stats[1] / (now - stats[0])
             self._proc_ms = 1000 * stats[2] / stats[1]
-            source = "measured" if self._pose.measured_is_live() else "estimated"
-            head_yaw, head_pitch = self._pose.at(now)
+            aim_yaw, aim_pitch = self._head.aim
             sent, failed = self._head.sent - stats[3], self._head.failed - stats[4]
-            face = (f"face at yaw {result.yaw:+.0f} pitch {result.pitch:+.0f}"
+            face = (f"face off-centre by yaw {result.yaw:+.0f} pitch {result.pitch:+.0f}"
                     if result.yaw is not None else "no face")
             print(f"[{self._fps:.1f} fps, {self._proc_ms:.1f} ms/frame, {result.state}, {face}; "
-                  f"head ({source}) yaw {head_yaw:+.0f} pitch {head_pitch:+.0f}; "
+                  f"head aim yaw {aim_yaw:+.0f} pitch {aim_pitch:+.0f}; "
                   f"{sent} head cmds" + (f", {failed} FAILED" if failed else "") + "]")
             self._stats = [now, 0, 0.0, self._head.sent, self._head.failed]
 
@@ -200,6 +231,8 @@ class FaceSession:
             if face.similarity is not None:
                 cv2.putText(frame, f"{face.similarity:.2f}", (x, y - 6),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        h, w = frame.shape[:2]
+        cv2.drawMarker(frame, (w // 2, h // 2), (255, 255, 255), cv2.MARKER_CROSS, 16, 1)
         cv2.putText(frame, f"{result.state}  {self._fps:.0f} fps  {self._proc_ms:.0f} ms", (8, 22),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.imshow("Misty face tracking", frame)

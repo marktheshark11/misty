@@ -91,12 +91,12 @@ The model must be installed in Ollama first. For example, run `ollama pull qwen2
 
 `main.py`, `idle_mode.py` and `follow_face.py` all use the same face tracking. Misty's built-in face detection is slow and has no notion of *which* person it is following, so the vision runs on this PC instead:
 
-1. Misty streams its camera to this PC over RTSP (640x480, 30 fps by default).
-2. This PC detects faces on every frame with OpenCV's YuNet model.
-3. It locks onto one person using an SFace face embedding. Other people in view are ignored. If the person is briefly hidden, Misty keeps aiming where they were heading, then waits about 3 seconds for that *same* person before picking someone new.
-4. It drives Misty's head directly, about 10 times per second. Each frame is matched with where the head was pointing when the frame was captured, so network delay doesn't make the head overshoot or wobble.
+1. Misty streams its camera to this PC over RTSP (640x480, 24 fps by default).
+2. This PC turns each frame upright (Misty's stream arrives rotated; the script works out by how much from the first faces it sees) and detects faces with OpenCV's YuNet model.
+3. It locks onto one person using an SFace face embedding. Other people in view are ignored. If the person is briefly hidden, Misty holds still, then waits about 3 seconds for that *same* person before picking someone new.
+4. About 10 times per second it nudges Misty's head so the face moves towards the centre of the picture. Only how far the face is from the centre matters, the same approach as the common pan/tilt face trackers, so there is no stream delay or camera geometry to calibrate.
 
-Misty shows `e_joy.jpg` while following someone and `e_defaultcontent.jpg` otherwise. Every script accepts `--preview`, which opens a window with a green box on the person being followed and grey boxes on everyone else.
+Misty shows `e_joy.jpg` while following someone and `e_defaultcontent.jpg` otherwise. Every script accepts `--preview`, which opens a window with a green box on the person being followed, grey boxes on everyone else, and a cross at the centre of the picture, where the head is trying to put the face.
 
 The first run downloads about 40 MB of face models into `models/`. On exit, each script stops the stream and turns Misty's camera service back on. **While the script runs, Misty's on-board camera features (TakePicture, face detection) are unavailable**, because Misty can't stream and use its camera at the same time. Keep Misty supervised while trying the behavior.
 
@@ -106,14 +106,16 @@ Set these environment variables before running if needed:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `MISTY_STREAM_FPS` | `30` | Stream frame rate. The script falls back to 24 if Misty rejects 30. |
+| `MISTY_TRACK_GAIN` | `1.5` | How eagerly the head centres the face. If the head swings back and forth around the face, lower it (try `1.0`); if it follows too slowly, raise it (try `2.5`). |
+| `MISTY_STREAM_ROTATE` | `auto` | Degrees to turn each frame clockwise so people are upright: `0`, `90`, `180`, `270`, or `auto`. The script prints the value it found; set it to skip the check. |
+| `MISTY_STREAM_TRANSPORT` | `tcp` | `tcp` or `udp`. Try `udp` if the video freezes for a moment now and then; go back to `tcp` if the picture smears. |
+| `MISTY_STREAM_FPS` | `24` | Stream frame rate (Misty accepts 2 to 29). |
 | `MISTY_STREAM_BITRATE` | `1500000` | Video bitrate. Lower it on a weak Wi-Fi link. |
-| `MISTY_STREAM_LATENCY` | `0.25` | Seconds from Misty's camera to this PC. If the head overshoots and swings back, raise it; if it lags behind a moving face, lower it. |
-| `MISTY_CAMERA_HFOV` | `70` | Horizontal field of view of the stream, in degrees. If the head consistently stops short of the face, raise it; if it overshoots, lower it. |
+| `MISTY_HEAD_VELOCITY` | `60` | Head speed for tracking moves, in percent of Misty's maximum. |
+| `MISTY_CAMERA_FOV` | `70` | Field of view across the longer side of the picture, in degrees. Only scales how strongly the head reacts. |
 | `MISTY_STREAM_PORT` | `1936` | RTSP port Misty publishes on. |
-| `MISTY_HEAD_SPEED` | `30` | Head speed (degrees/second at full velocity) assumed when Misty isn't reporting its head position. Too high makes the head overshoot; too low only makes it slower. |
 
-Every 5 seconds the scripts print a status line: frame rate, processing time, tracker state, where the face is, where the head is, and how many head commands were sent (and failed). Angles are in degrees; positive yaw is Misty's left, negative pitch is up. `head (measured)` means Misty is reporting its actual head position, which gives the best tracking. `head (estimated)` means it isn't, and the head position is estimated from the commands sent. Tracking still works then, but it follows a moving face in steps rather than smoothly.
+Every 5 seconds the scripts print a status line: frame rate, processing time, tracker state, how far the face is from the centre of the picture, where the head is aiming, and how many head commands were sent (and failed). Angles are in degrees; positive yaw is Misty's left, negative pitch is up. While following, the off-centre numbers should shrink towards zero. If they grow instead, run with `--preview` and check that the picture is upright and not mirrored.
 
 ## Other scripts
 

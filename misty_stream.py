@@ -18,8 +18,9 @@ RTSP_OPTIONS = {
     "analyzeduration": "2000000",
     "probesize": "1000000",
 }
-# TCP avoids smeared frames from lost packets on Wi-Fi; UDP is tried as a fallback in
-# case Misty's RTSP server or a firewall doesn't cooperate with TCP.
+# TCP never shows smeared frames (which cause false detections) but stalls briefly when
+# Wi-Fi drops a packet; UDP never stalls but smears until the next keyframe. The
+# preferred one (MISTY_STREAM_TRANSPORT) is tried first, the other as a fallback.
 RTSP_TRANSPORTS = ("tcp", "udp")
 OPEN_TIMEOUT = 20.0  # Misty's encoder can take several seconds to emit its first keyframe.
 READ_TIMEOUT = 5.0
@@ -59,7 +60,6 @@ def start_misty_stream(misty, port: int, width: int, height: int, fps: int, bitr
             "Starting the AV stream",
         )
     except Exception as error:
-        # Misty's docs disagree on whether 30 fps is allowed; fall back to a safe rate.
         print(f"Stream start at {fps} fps failed ({error}); retrying at 24 fps.")
         _check(
             misty.start_av_streaming(
@@ -89,8 +89,9 @@ class LatestFrameReader:
     always gets the freshest frame, never a stale one queued in a buffer.
     """
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, transport: str = "tcp"):
         self.url = url
+        self._transports = (transport,) + tuple(t for t in RTSP_TRANSPORTS if t != transport)
         self._cond = threading.Condition()
         self._frame = None
         self._time = 0.0
@@ -105,7 +106,7 @@ class LatestFrameReader:
         attempt = 0
         while self._running:
             is_rtsp = self.url.startswith("rtsp://")
-            transport = RTSP_TRANSPORTS[attempt % len(RTSP_TRANSPORTS)]
+            transport = self._transports[attempt % len(self._transports)]
             attempt += 1
             options = dict(RTSP_OPTIONS, rtsp_transport=transport) if is_rtsp else {}
             if is_rtsp:
