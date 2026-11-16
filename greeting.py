@@ -50,8 +50,8 @@ class Greeting:
     def start(self, announce: bool = True) -> None:
         """Capture the photo before the approach begins.
 
-        announce=False skips the "I see you" line, which is only said for the first
-        face of a run.
+        announce=False skips the "I see you" line, which is said for the first face of
+        a run and again after a face was lost mid-interaction.
         """
         self._announce = announce
         self.head_petted.clear()

@@ -47,8 +47,8 @@ def run(misty, approach) -> None:
     eyes_showing_face = False
     detection_started = False
     greeting_started_for_face = False
-    # True once "I see you" has been said. It is said for the first face detected and
-    # never again for the rest of the run.
+    # True once "I see you" has been said. It is said for the first face detected, and
+    # again only after Misty has lost someone and said the face-lost line.
     face_announced = False
     returning_to_scan = False
     next_attempt_at = 0.0
@@ -82,6 +82,8 @@ def run(misty, approach) -> None:
         next_attempt_at = time.monotonic() + retry_delay
 
     def say_face_lost() -> None:
+        nonlocal face_announced
+        face_announced = False  # The next face found gets "I see you" again.
         # Called once the interrupted greeting has gone quiet, so it isn't cut off.
         print(f"Misty says: {FACE_LOST_PHRASE}")
         try:
