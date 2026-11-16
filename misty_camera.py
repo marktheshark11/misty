@@ -1,8 +1,24 @@
 import base64
+import time
+
+CAMERA_IMAGE = "e_SystemCamera.jpg"
+AFTER_PHOTO_IMAGE = "e_DefaultContent.jpg"
+
+
+def show_camera_face(misty) -> None:
+    """Show the camera face while a picture is being taken."""
+    misty.display_image(fileName=CAMERA_IMAGE)
+
+
+def restore_face(misty) -> None:
+    """Put the normal face back once the picture is taken."""
+    time.sleep(0.2)
+    misty.display_image(fileName=AFTER_PHOTO_IMAGE)
 
 
 def take_picture(misty) -> bytes:
     """Capture an image and return the decoded JPEG bytes."""
+    show_camera_face(misty)
     print("Taking picture...")
     response = misty.get_request(
         "cameras/rgb",
@@ -33,5 +49,5 @@ def take_picture(misty) -> bytes:
 
     if image_base64.startswith("data:") and "," in image_base64:
         image_base64 = image_base64.split(",", 1)[1]
-
+    restore_face(misty)
     return base64.b64decode(image_base64)

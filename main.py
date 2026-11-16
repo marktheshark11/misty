@@ -26,6 +26,7 @@ NEUTRAL_PITCH = -15
 PETTED_IMAGE = "e_love.jpg"
 RETRY_DELAY = 10.0
 MISSING_DISTANCE_TIMEOUT = 10.0
+FACE_LOST_PHRASE = "Oh, where did you go?"
 
 
 class State(Enum):
@@ -76,6 +77,14 @@ def run(misty, approach) -> None:
         ).raise_for_status()
         greeting_started_for_face = False
         next_attempt_at = time.monotonic() + retry_delay
+
+    def say_face_lost() -> None:
+        # Called once the interrupted greeting has gone quiet, so it isn't cut off.
+        print(f"Misty says: {FACE_LOST_PHRASE}")
+        try:
+            misty.speak(FACE_LOST_PHRASE, flush=True, language="en-US").raise_for_status()
+        except Exception as error:
+            print(f"Could not say the face-lost line: {error}")
 
     def enter_petted() -> None:
         nonlocal state
@@ -171,6 +180,7 @@ def run(misty, approach) -> None:
                     returning_to_scan = True
                 if greeting.done.is_set():
                     returning_to_scan = False
+                    say_face_lost()
                     reset_to_scan()
                     state = State.SCANNING
                 else:
@@ -180,6 +190,7 @@ def run(misty, approach) -> None:
             if returning_to_scan:
                 if greeting.done.is_set():
                     returning_to_scan = False
+                    say_face_lost()
                     reset_to_scan()
                     state = State.SCANNING
                 else:
