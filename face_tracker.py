@@ -95,9 +95,14 @@ class FaceTracker:
         self._candidate_count = 0
 
     # ----- geometry ----------------------------------------------------------------------
+    def focal_px(self, shape) -> float:
+        """Focal length in pixels for a frame of this shape."""
+        h, w = shape[:2]
+        return (max(w, h) / 2.0) / math.tan(math.radians(self.cfg.hfov_deg) / 2.0)
+
     def _to_world(self, row, shape, head_yaw, head_pitch):
         h, w = shape[:2]
-        fx = (max(w, h) / 2.0) / math.tan(math.radians(self.cfg.hfov_deg) / 2.0)
+        fx = self.focal_px(shape)
         cx = row[0] + row[2] / 2.0
         cy = row[1] + row[3] / 2.0
         ax = math.degrees(math.atan((cx - w / 2.0) / fx))

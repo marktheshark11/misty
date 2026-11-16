@@ -15,8 +15,10 @@ class Greeting:
 
     HEAD_SENSORS = {"headfront", "headback", "headleft", "headright", "scruff"}
 
-    def __init__(self, misty):
+    def __init__(self, misty, take_photo=None):
         self.misty = misty
+        # Returns JPEG bytes; defaults to Misty's own camera.
+        self._take_photo = take_photo or (lambda: take_picture(misty))
         self.head_petted = threading.Event()
         self.petted = threading.Event()
         self.shutting_down = threading.Event()
@@ -102,7 +104,7 @@ class Greeting:
             if self.shutting_down.is_set():
                 return
             print("Taking a picture before approaching...")
-            self._photo = take_picture(self.misty)
+            self._photo = self._take_photo()
             if self.shutting_down.is_set():
                 return
             self.photo_captured.set()

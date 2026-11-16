@@ -54,9 +54,12 @@ def is_following(result) -> bool:
 
 
 class FaceSession:
-    def __init__(self, misty, preview: bool = False):
+    def __init__(self, misty, preview: bool = False, follow: bool = True):
+        """follow=False only detects and locks onto a face: the head and eyes are left
+        to the caller (main_remote.py drives them the same way as the on-board version)."""
         self.misty = misty
         self.preview = preview
+        self.follow = follow
         self.tracker = FaceTracker(model_path("detector"), model_path("recognizer"),
                                    TrackerConfig(hfov_deg=CAMERA_FOV))
         self.result = None
@@ -152,14 +155,17 @@ class FaceSession:
             # Head angles are passed as 0, so the result is the face's angle from the
             # centre of the picture: exactly the error the head has to remove.
             result = self.tracker.update(frame, 0.0, 0.0, t=received)
-        if result.state == SEARCHING:
+        if not self.follow:
+            pass
+        elif result.state == SEARCHING:
             self._head.release()
         elif result.target is not None:
             # Only frames where the face was really seen move the head; while coasting
             # or waiting for the person to reappear, the head simply holds still.
             self._head.track(result.yaw, result.pitch, received - self._last_tracked)
             self._last_tracked = received
-        self.set_eyes(is_following(result))
+        if self.follow:
+            self.set_eyes(is_following(result))
         self._frame, self.result = frame, result
 
         self._update_stats(result, time.monotonic() - started)
@@ -188,6 +194,8 @@ class FaceSession:
 
     def jpeg(self, quality: int = 85) -> bytes:
         """The most recently processed frame as JPEG (replaces take_picture while streaming)."""
+        if self._frame is None:
+            raise RuntimeError("No camera frame has arrived yet")
         ok, data = cv2.imencode(".jpg", self._frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
         if not ok:
             raise RuntimeError("Could not encode the camera frame as JPEG")
@@ -216,9 +224,9 @@ class FaceSession:
             sent, failed = self._head.sent - stats[3], self._head.failed - stats[4]
             face = (f"face off-centre by yaw {result.yaw:+.0f} pitch {result.pitch:+.0f}"
                     if result.yaw is not None else "no face")
-            print(f"[{self._fps:.1f} fps, {self._proc_ms:.1f} ms/frame, {result.state}, {face}; "
-                  f"head aim yaw {aim_yaw:+.0f} pitch {aim_pitch:+.0f}; "
-                  f"{sent} head cmds" + (f", {failed} FAILED" if failed else "") + "]")
+            head = (f"; head aim yaw {aim_yaw:+.0f} pitch {aim_pitch:+.0f}; {sent} head cmds"
+                    + (f", {failed} FAILED" if failed else "")) if self.follow else ""
+            print(f"[{self._fps:.1f} fps, {self._proc_ms:.1f} ms/frame, {result.state}, {face}{head}]")
             self._stats = [now, 0, 0.0, self._head.sent, self._head.failed]
 
     def _draw_preview(self, frame, result) -> int:

@@ -1,4 +1,8 @@
-"""Run Misty's face scan, approach, greeting, and petting interaction."""
+"""Run Misty's face scan, approach, greeting, and petting interaction.
+
+This file uses Misty's on-board face detection. main_remote.py runs the same
+interaction with face detection on this PC instead; both share run() below.
+"""
 
 import time
 from enum import Enum, auto
@@ -31,11 +35,10 @@ class State(Enum):
     PETTED = auto()
 
 
-def main() -> None:
-    print("Connecting to Misty...")
-    misty = Robot(MISTY_IP)
-    approach = FaceApproach(misty)
-    greeting = Greeting(misty)
+def run(misty, approach) -> None:
+    """Run the interaction. `approach` supplies the face data: FaceApproach for Misty's
+    on-board detection, RemoteFaceApproach for detection on this PC."""
+    greeting = Greeting(misty, take_photo=approach.take_picture)
     bump_reset = BumpReset(misty)
     state = State.SCANNING
     eyes_showing_face = False
@@ -81,20 +84,18 @@ def main() -> None:
         greeting.stop()
         approach.halt()
         if greeting_started_for_face:
-            while not greeting.done.wait(0.1):
-                pass
+            while not greeting.done.is_set():
+                approach.wait(0.1)
         reset_to_scan()
         returning_to_scan = False
         state = State.SCANNING
 
     try:
         misty.display_image(IDLE_IMAGE).raise_for_status()
-        approach.register()
         greeting.register()
         bump_reset.register()
-        time.sleep(0.5)
-        misty.start_face_detection().raise_for_status()
-        detection_started = True
+        detection_started = True  # Set first so a failed start is still cleaned up.
+        approach.start()
 
         print("Idle scan is running. Press Ctrl+C to stop.")
         while True:
@@ -112,7 +113,7 @@ def main() -> None:
                 continue
 
             if state is State.PETTED:
-                time.sleep(0.5)
+                approach.wait(0.5)
                 continue
 
             face_visible = face_seen_recently()
@@ -138,7 +139,7 @@ def main() -> None:
                 ).raise_for_status()
                 deadline = time.monotonic() + MOVE_DURATION
                 while time.monotonic() < deadline and not face_seen_recently():
-                    time.sleep(0.1)
+                    approach.wait(0.1)
                 if face_seen_recently():
                     continue  # Keep this pitch; it found the face.
                 pitch_index = (pitch_index + 1) % len(PITCH_POSITIONS)
@@ -165,7 +166,7 @@ def main() -> None:
                     reset_to_scan()
                     state = State.SCANNING
                 else:
-                    time.sleep(0.1)
+                    approach.wait(0.1)
                 continue
 
             if returning_to_scan:
@@ -174,7 +175,7 @@ def main() -> None:
                     reset_to_scan()
                     state = State.SCANNING
                 else:
-                    time.sleep(0.1)
+                    approach.wait(0.1)
                 continue
 
             if state is State.CAPTURING_PHOTO:
@@ -187,7 +188,7 @@ def main() -> None:
                         reset_to_scan()
                         state = State.SCANNING
                 else:
-                    time.sleep(0.1)
+                    approach.wait(0.1)
                 continue
 
             if state is State.APPROACHING:
@@ -197,7 +198,7 @@ def main() -> None:
                     approach.halt()
                     greeting.start_arrival_interaction()
                     state = State.ARRIVED
-                time.sleep(LOOP_PERIOD)
+                approach.wait(LOOP_PERIOD)
                 continue
 
             if state is State.ARRIVED:
@@ -207,7 +208,7 @@ def main() -> None:
                     print("The compliment did not finish; returning to idle scan.")
                     reset_to_scan()
                     state = State.SCANNING
-                time.sleep(LOOP_PERIOD)
+                approach.wait(LOOP_PERIOD)
                 continue
 
             if state is State.WAITING_FOR_PET and greeting.done.is_set():
@@ -219,7 +220,7 @@ def main() -> None:
                 continue
 
             if state is State.WAITING_FOR_PET:
-                time.sleep(LOOP_PERIOD)
+                approach.wait(LOOP_PERIOD)
                 continue
 
     except KeyboardInterrupt:
@@ -232,7 +233,7 @@ def main() -> None:
             print(f"Could not stop driving: {error}")
         if detection_started:
             try:
-                misty.stop_face_detection().raise_for_status()
+                approach.stop()
             except Exception as error:
                 print(f"Could not stop face detection cleanly: {error}")
         misty.unregister_all_events()
@@ -250,6 +251,12 @@ def main() -> None:
             misty.display_image(IDLE_IMAGE).raise_for_status()
         except Exception as error:
             print(f"Could not restore idle eyes: {error}")
+
+
+def main() -> None:
+    print("Connecting to Misty...")
+    misty = Robot(MISTY_IP)
+    run(misty, FaceApproach(misty))
 
 
 if __name__ == "__main__":

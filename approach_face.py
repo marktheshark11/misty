@@ -6,6 +6,7 @@ import time
 from mistyPy.Events import Events
 
 from face_utils import get_property
+from misty_camera import take_picture
 
 # --- Calibration and movement settings ---
 BACKUP_DISTANCE = 1.00  # reverse if the camera estimate puts the person closer than this
@@ -72,6 +73,22 @@ class FaceApproach:
         self.pitch = START_PITCH
         self.driving = False
         self.last_distance_log = 0.0
+
+    # ----- face source: Misty's on-board detection (RemoteFaceApproach replaces these) -----
+    def start(self) -> None:
+        self.register()
+        time.sleep(0.5)
+        self.misty.start_face_detection().raise_for_status()
+
+    def stop(self) -> None:
+        self.misty.stop_face_detection().raise_for_status()
+
+    def wait(self, seconds: float) -> None:
+        """Pause the main loop; face events keep arriving in the background."""
+        time.sleep(seconds)
+
+    def take_picture(self) -> bytes:
+        return take_picture(self.misty)
 
     def register(self) -> None:
         self.misty.register_event(
