@@ -1,12 +1,12 @@
-"""Idle-scan for a face, walk up to it, and speak a brief clothing compliment."""
+"""Run Misty's face scan, approach, greeting, and petting interaction."""
 
-import threading
 import time
+from enum import Enum, auto
 
-from mistyPy.Events import Events
 from mistyPy.Robot import Robot
 
 from approach_face import LOOP_PERIOD, FaceApproach
+from bump_reset import BumpReset
 from face_utils import (
     FACE_ACTIVE_WINDOW,
     FACE_IMAGE,
@@ -14,182 +14,218 @@ from face_utils import (
     MOVE_DURATION,
     PITCH_POSITIONS,
     YAW_POSITIONS,
-    get_property,
 )
-from misty_camera import take_picture
-from ollama_client import describe_person
+from greeting import Greeting
 from settings import MISTY_IP
 
 NEUTRAL_PITCH = -15
+PETTED_IMAGE = "e_love.jpg"
+
+
+class State(Enum):
+    SCANNING = auto()
+    CAPTURING_PHOTO = auto()
+    APPROACHING = auto()
+    ARRIVED = auto()
+    WAITING_FOR_PET = auto()
+    PETTED = auto()
 
 
 def main() -> None:
     print("Connecting to Misty...")
     misty = Robot(MISTY_IP)
     approach = FaceApproach(misty)
-    eyes_showing_face = [False]
-    head_petted = threading.Event()
-    shutting_down = threading.Event()
-    speech_event_index = [0]
+    greeting = Greeting(misty)
+    bump_reset = BumpReset(misty)
+    state = State.SCANNING
+    eyes_showing_face = False
     detection_started = False
-    tracking_started = False
-    description_attempted = False
-
-    def speak_and_wait(text: str) -> None:
-        """Speak one line and wait for Misty's playback-complete event."""
-        speech_event_index[0] += 1
-        event_name = f"MainSpeechComplete{speech_event_index[0]}"
-        completed = threading.Event()
-        subscription = misty.register_event(
-            Events.TextToSpeechComplete,
-            event_name,
-            keep_alive=False,
-            callback_function=lambda event: completed.set(),
-        )
-
-        # Wait for the WebSocket subscription to be established before speaking,
-        # so a short utterance cannot finish before its completion event is heard.
-        deadline = time.monotonic() + 5
-        while getattr(subscription, "initial_flag", False) and time.monotonic() < deadline:
-            time.sleep(0.05)
-
-        try:
-            misty.speak(
-                text,
-                flush=True,
-                utteranceId=event_name,
-                language="en-US",
-            ).raise_for_status()
-            if not completed.wait(30):
-                raise TimeoutError(f"Timed out waiting for Misty to finish saying: {text}")
-        finally:
-            if not completed.is_set():
-                misty.unregister_event(event_name)
-
-    def on_touch_event(event) -> None:
-        message = get_property(event, "message", {})
-        position = str(get_property(message, "sensorPosition", "")).casefold()
-        is_head = position in {"headfront", "headback", "headleft", "headright", "scruff"}
-        if is_head and get_property(message, "isContacted", False):
-            head_petted.set()
-
-    def ask_to_be_petted() -> None:
-        try:
-            head_petted.clear()
-            while not head_petted.is_set() and not shutting_down.is_set():
-                started = time.monotonic()
-                speak_and_wait("Would you like to pet my head?")
-                wait_time = max(0, 3.0 - (time.monotonic() - started))
-                if head_petted.wait(wait_time):
-                    break
-            if head_petted.is_set() and not shutting_down.is_set():
-                speak_and_wait("Thank you!")
-        except Exception as error:
-            print(f"Could not ask to be petted: {error}")
+    greeting_started_for_face = False
+    returning_to_scan = False
+    pitch_index = 0
+    yaw_index = 0
 
     def face_seen_recently() -> bool:
         return approach.seconds_since_face() <= FACE_ACTIVE_WINDOW
 
     def set_face_eyes(face_seen: bool) -> None:
-        if eyes_showing_face[0] == face_seen:
+        nonlocal eyes_showing_face
+        if eyes_showing_face == face_seen:
             return
         image = FACE_IMAGE if face_seen else IDLE_IMAGE
         misty.display_image(image).raise_for_status()
-        eyes_showing_face[0] = face_seen
+        eyes_showing_face = face_seen
 
-    def wave() -> None:
-        # A short, gentle right-arm wave while Misty remains stopped.
-        for position in (55, 35, 55, 35, 55, 0):
-            misty.move_arm("right", position, 35, units="degrees").raise_for_status()
+    def reset_to_scan() -> None:
+        nonlocal eyes_showing_face, greeting_started_for_face
+        approach.halt()
+        set_face_eyes(False)
+        misty.move_head(
+            pitch=NEUTRAL_PITCH,
+            roll=0,
+            yaw=0,
+            duration=1.0,
+            units="degrees",
+        ).raise_for_status()
+        greeting_started_for_face = False
 
-    def greet_and_compliment() -> None:
-        # Runs in a thread so Misty keeps holding distance during capture and speech.
-        try:
-            print("Taking a picture, waving, and greeting the person...")
-            photo = take_picture(misty)
-            wave()
-            speak_and_wait("Hi, I'm Misty!")
-            detail = describe_person(photo)
-            if not detail:
-                print("Ollama found no specific visible detail to mention.")
-            else:
-                phrase = f"Nice to meet you. I like your {detail}."
-                print(f"Misty says: {phrase}")
-                speak_and_wait(phrase)
-            ask_to_be_petted()
-        except Exception as error:
-            print(f"Could not complete the greeting: {error}")
+    def enter_petted() -> None:
+        nonlocal state
+        approach.halt()
+        misty.display_image(PETTED_IMAGE).raise_for_status()
+        state = State.PETTED
 
-    pitch_index = 0
-    yaw_index = 0
+    def reset_to_idle() -> None:
+        nonlocal state, returning_to_scan
+        print("Both front bump sensors pressed; resetting to idle scan.")
+        greeting.stop()
+        approach.halt()
+        if greeting_started_for_face:
+            while not greeting.done.wait(0.1):
+                pass
+        reset_to_scan()
+        returning_to_scan = False
+        state = State.SCANNING
+
     try:
         misty.display_image(IDLE_IMAGE).raise_for_status()
         approach.register()
-        misty.register_event(
-            Events.TouchSensor,
-            "MainHeadPetting",
-            keep_alive=True,
-            callback_function=on_touch_event,
-        )
+        greeting.register()
+        bump_reset.register()
         time.sleep(0.5)
         misty.start_face_detection().raise_for_status()
         detection_started = True
 
         print("Idle scan is running. Press Ctrl+C to stop.")
         while True:
-            if face_seen_recently():
-                set_face_eyes(True)
-                if not tracking_started:
-                    print("Face detected; approaching.")
-                    approach.face_forward(PITCH_POSITIONS[pitch_index])
-                    tracking_started = True
+            if bump_reset.requested.is_set():
+                bump_reset.requested.clear()
+                reset_to_idle()
+                continue
 
-                arrived = approach.step()
-                if arrived and not description_attempted:
-                    description_attempted = True
-                    print("Arrived in front of the person.")
-                    threading.Thread(target=greet_and_compliment, daemon=True).start()
+            if (
+                state is State.WAITING_FOR_PET
+                and greeting.petted.is_set()
+                and greeting.done.is_set()
+            ):
+                enter_petted()
+                continue
+
+            if state is State.PETTED:
+                time.sleep(0.5)
+                continue
+
+            face_visible = face_seen_recently()
+
+            if state is State.SCANNING:
+                if face_visible:
+                    print("Face detected; taking a picture before tracking and approaching.")
+                    set_face_eyes(True)
+                    greeting.start()
+                    greeting_started_for_face = True
+                    state = State.CAPTURING_PHOTO
+                    continue
+
+                set_face_eyes(False)
+                pitch = PITCH_POSITIONS[pitch_index]
+                yaw = YAW_POSITIONS[yaw_index]
+                misty.move_head(
+                    pitch=pitch,
+                    roll=0,
+                    yaw=yaw,
+                    duration=MOVE_DURATION,
+                    units="degrees",
+                ).raise_for_status()
+                deadline = time.monotonic() + MOVE_DURATION
+                while time.monotonic() < deadline and not face_seen_recently():
+                    time.sleep(0.1)
+                if face_seen_recently():
+                    continue  # Keep this pitch; it found the face.
+                pitch_index = (pitch_index + 1) % len(PITCH_POSITIONS)
+                if pitch_index == 0:
+                    yaw_index = (yaw_index + 1) % len(YAW_POSITIONS)
+                continue
+
+            if state not in {State.SCANNING, State.PETTED} and not face_visible:
+                approach.halt()
+                greeting.stop()
+                if not returning_to_scan:
+                    print("Face no longer detected; finishing the current utterance before scanning again.")
+                    set_face_eyes(False)
+                    misty.move_head(
+                        pitch=NEUTRAL_PITCH,
+                        roll=0,
+                        yaw=0,
+                        duration=1.0,
+                        units="degrees",
+                    ).raise_for_status()
+                    returning_to_scan = True
+                if greeting.done.is_set():
+                    returning_to_scan = False
+                    reset_to_scan()
+                    state = State.SCANNING
+                else:
+                    time.sleep(0.1)
+                continue
+
+            if returning_to_scan:
+                if greeting.done.is_set():
+                    returning_to_scan = False
+                    reset_to_scan()
+                    state = State.SCANNING
+                else:
+                    time.sleep(0.1)
+                continue
+
+            if state is State.CAPTURING_PHOTO:
+                if greeting.photo_capture_done.is_set():
+                    if greeting.photo_captured.is_set():
+                        print("Photo captured; tracking and approaching the person.")
+                        approach.face_forward(PITCH_POSITIONS[pitch_index])
+                        state = State.APPROACHING
+                    else:
+                        reset_to_scan()
+                        state = State.SCANNING
+                else:
+                    time.sleep(0.1)
+                continue
+
+            if state is State.APPROACHING:
+                set_face_eyes(True)
+                if approach.step():
+                    print("Arrived in front of the person; holding position for the compliment.")
+                    approach.halt()
+                    greeting.start_arrival_interaction()
+                    state = State.ARRIVED
                 time.sleep(LOOP_PERIOD)
                 continue
 
-            if tracking_started:
-                print("Face no longer detected; returning to idle scan.")
-                approach.halt()
-                set_face_eyes(False)
-                misty.move_head(
-                    pitch=NEUTRAL_PITCH,
-                    roll=0,
-                    yaw=0,
-                    duration=1.0,
-                    units="degrees",
-                ).raise_for_status()
-                tracking_started = False
-                description_attempted = False
-                time.sleep(1.0)
+            if state is State.ARRIVED:
+                if greeting.compliment_done.is_set():
+                    state = State.WAITING_FOR_PET
+                elif greeting.done.is_set():
+                    print("The compliment did not finish; returning to idle scan.")
+                    reset_to_scan()
+                    state = State.SCANNING
+                time.sleep(LOOP_PERIOD)
                 continue
 
-            set_face_eyes(False)
-            pitch = PITCH_POSITIONS[pitch_index]
-            yaw = YAW_POSITIONS[yaw_index]
-            misty.move_head(
-                pitch=pitch,
-                roll=0,
-                yaw=yaw,
-                duration=MOVE_DURATION,
-                units="degrees",
-            ).raise_for_status()
-            deadline = time.monotonic() + MOVE_DURATION
-            while time.monotonic() < deadline and not face_seen_recently():
-                time.sleep(0.1)
-            if face_seen_recently():
-                continue  # keep pitch_index so face_forward uses the pitch that found the face
-            pitch_index = (pitch_index + 1) % len(PITCH_POSITIONS)
-            if pitch_index == 0:
-                yaw_index = (yaw_index + 1) % len(YAW_POSITIONS)
+            if state is State.WAITING_FOR_PET and greeting.done.is_set():
+                if greeting.petted.is_set():
+                    enter_petted()
+                else:
+                    reset_to_scan()
+                    state = State.SCANNING
+                continue
+
+            if state is State.WAITING_FOR_PET:
+                time.sleep(LOOP_PERIOD)
+                continue
+
     except KeyboardInterrupt:
         print("Stopping Misty...")
     finally:
-        shutting_down.set()
+        greeting.stop()
         try:
             misty.stop()
         except Exception as error:
