@@ -4,13 +4,17 @@ import base64
 def take_picture(misty) -> bytes:
     """Capture an image and return the decoded JPEG bytes."""
     print("Taking picture...")
-    response = misty.take_picture(
-        base64=True,
-        fileName="vision.jpg",
-        width=640,
-        height=480,
-        displayOnScreen=False,
-        overwriteExisting=True,
+    response = misty.get_request(
+        "cameras/rgb",
+        json={
+            "base64": True,
+            "fileName": "vision.jpg",
+            "width": 640,
+            "height": 480,
+            "displayOnScreen": False,
+            "overwriteExisting": True,
+        },
+        timeout=(3, 15),
     )
 
     print("Misty status:", response.status_code)

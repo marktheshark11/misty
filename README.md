@@ -1,13 +1,13 @@
 # Misty face greeting
 
-Run `main.py` to have Misty scan for a face. When she sees one, she says “I see you,” takes a picture, and starts approaching while the picture is analyzed. At the estimated 1–1.5 m range, she stops, waves, and says “Hi, I'm Misty!” If the picture analysis is still running, she says “Trying to think of a compliment,” then gives a brief compliment when a visible clothing detail is available. She then asks to be petted until a head touch sensor is activated. After a head pet, Misty says “Thank you!”, displays `e_love.jpg`, and stays still in that state until the program is stopped.
+Run `main.py` to have Misty scan for a face. When she sees one, she says “I see you,” takes a picture, and starts approaching while the picture is analyzed. At the estimated 1–1.5 m range, she stops, waves, and says “Hi, I'm Misty!” If the picture analysis is still running, she says “Trying to think of a compliment,” then gives a brief compliment when a visible clothing detail is available. She waits two seconds after that step before asking to be petted until a head touch sensor is activated. After a head pet, Misty says “Thank you!”, displays `e_love.jpg`, and stays still in that state until the program is stopped.
 
 There are two versions of the program. They run the same interaction from the same code and differ only in where faces are detected:
 
 - `main.py` uses Misty's on-board face detection.
 - `main_remote.py` detects faces on this PC from Misty's video stream, which is faster and keeps following the same person when others are in view (see [Face detection on this PC](#face-detection-on-this-pc)).
 
-The main loop uses six states: scanning, photo capture, approaching, arrived/greeting/compliment, waiting for a pet, and petted. Losing the face during an interaction cancels that interaction before scanning resumes. Press both front leg bump sensors together to cancel the current interaction and reset to idle scanning.
+The main loop uses six states: scanning, photo capture, approaching, arrived/greeting/compliment, waiting for a pet, and petted. If no face is found, Misty keeps scanning. Losing the face during an interaction cancels that interaction before scanning resumes. If face distance is unavailable for 10 seconds during approach, Misty stops and returns to scanning. After a failed photo or greeting, Misty waits 10 seconds before trying the visible face again. Press both front leg bump sensors together to cancel the current interaction and reset to idle scanning.
 
 ## Setup
 

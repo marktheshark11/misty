@@ -131,6 +131,13 @@ class FaceApproach:
         with self.lock:
             return time.monotonic() - self.face["seen"]
 
+    def has_fresh_distance(self) -> bool:
+        with self.lock:
+            return (
+                self.face["distance"] is not None
+                and time.monotonic() - self.face["distance_seen"] <= DISTANCE_STALE_AFTER
+            )
+
     def face_forward(self, pitch: float) -> None:
         """Set the head pitch and center its yaw before the body turns."""
         self.pitch = pitch

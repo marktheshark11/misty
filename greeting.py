@@ -9,6 +9,8 @@ from face_utils import get_property
 from misty_camera import take_picture
 from ollama_client import describe_person
 
+PET_REQUEST_DELAY = 2.0
+
 
 class Greeting:
     """Run the human-facing parts of one interaction with Misty."""
@@ -107,13 +109,13 @@ class Greeting:
             self._photo = self._take_photo()
             if self.shutting_down.is_set():
                 return
-            self.photo_captured.set()
             interaction_id = self._interaction_id
             threading.Thread(
                 target=self._describe_photo,
                 args=(self._photo, interaction_id),
                 daemon=True,
             ).start()
+            self.photo_captured.set()
         except Exception as error:
             print(f"Could not take the picture: {error}")
             self.done.set()
@@ -154,6 +156,8 @@ class Greeting:
             if self.shutting_down.is_set():
                 return
             self.compliment_done.set()
+            if self.shutting_down.wait(PET_REQUEST_DELAY):
+                return
             self._ask_to_be_petted()
         except Exception as error:
             print(f"Could not give the compliment or ask to be petted: {error}")
@@ -179,6 +183,10 @@ class Greeting:
                 self.misty.unregister_event(event_name)
                 return
             time.sleep(0.05)
+
+        if getattr(subscription, "initial_flag", False):
+            self.misty.unregister_event(event_name)
+            raise TimeoutError("Timed out waiting for Misty's speech event subscription")
 
         try:
             self.misty.speak(

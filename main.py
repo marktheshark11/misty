@@ -24,6 +24,8 @@ from settings import MISTY_IP
 
 NEUTRAL_PITCH = -15
 PETTED_IMAGE = "e_love.jpg"
+RETRY_DELAY = 10.0
+MISSING_DISTANCE_TIMEOUT = 10.0
 
 
 class State(Enum):
@@ -45,6 +47,8 @@ def run(misty, approach) -> None:
     detection_started = False
     greeting_started_for_face = False
     returning_to_scan = False
+    next_attempt_at = 0.0
+    missing_distance_since = None
     pitch_index = 0
     yaw_index = 0
 
@@ -59,8 +63,8 @@ def run(misty, approach) -> None:
         misty.display_image(image).raise_for_status()
         eyes_showing_face = face_seen
 
-    def reset_to_scan() -> None:
-        nonlocal eyes_showing_face, greeting_started_for_face
+    def reset_to_scan(retry_delay: float = 0.0) -> None:
+        nonlocal greeting_started_for_face, next_attempt_at
         approach.halt()
         set_face_eyes(False)
         misty.move_head(
@@ -71,6 +75,7 @@ def run(misty, approach) -> None:
             units="degrees",
         ).raise_for_status()
         greeting_started_for_face = False
+        next_attempt_at = time.monotonic() + retry_delay
 
     def enter_petted() -> None:
         nonlocal state
@@ -120,8 +125,11 @@ def run(misty, approach) -> None:
 
             if state is State.SCANNING:
                 if face_visible:
-                    print("Face detected; taking a picture before tracking and approaching.")
                     set_face_eyes(True)
+                    if time.monotonic() < next_attempt_at:
+                        approach.wait(LOOP_PERIOD)
+                        continue
+                    print("Face detected; taking a picture before tracking and approaching.")
                     greeting.start()
                     greeting_started_for_face = True
                     state = State.CAPTURING_PHOTO
@@ -149,9 +157,9 @@ def run(misty, approach) -> None:
 
             if state not in {State.SCANNING, State.PETTED} and not face_visible:
                 approach.halt()
-                greeting.stop()
                 if not returning_to_scan:
-                    print("Face no longer detected; finishing the current utterance before scanning again.")
+                    greeting.stop()
+                    print("Face no longer detected; returning to idle scan.")
                     set_face_eyes(False)
                     misty.move_head(
                         pitch=NEUTRAL_PITCH,
@@ -183,9 +191,10 @@ def run(misty, approach) -> None:
                     if greeting.photo_captured.is_set():
                         print("Photo captured; tracking and approaching the person.")
                         approach.face_forward(PITCH_POSITIONS[pitch_index])
+                        missing_distance_since = None
                         state = State.APPROACHING
                     else:
-                        reset_to_scan()
+                        reset_to_scan(RETRY_DELAY)
                         state = State.SCANNING
                 else:
                     approach.wait(0.1)
@@ -198,6 +207,17 @@ def run(misty, approach) -> None:
                     approach.halt()
                     greeting.start_arrival_interaction()
                     state = State.ARRIVED
+                elif approach.has_fresh_distance():
+                    missing_distance_since = None
+                else:
+                    if missing_distance_since is None:
+                        missing_distance_since = time.monotonic()
+                    elif time.monotonic() - missing_distance_since >= MISSING_DISTANCE_TIMEOUT:
+                        print("No usable face distance; returning to idle scan.")
+                        greeting.stop()
+                        approach.halt()
+                        reset_to_scan(RETRY_DELAY)
+                        state = State.SCANNING
                 approach.wait(LOOP_PERIOD)
                 continue
 
@@ -206,7 +226,7 @@ def run(misty, approach) -> None:
                     state = State.WAITING_FOR_PET
                 elif greeting.done.is_set():
                     print("The compliment did not finish; returning to idle scan.")
-                    reset_to_scan()
+                    reset_to_scan(RETRY_DELAY)
                     state = State.SCANNING
                 approach.wait(LOOP_PERIOD)
                 continue
@@ -215,7 +235,7 @@ def run(misty, approach) -> None:
                 if greeting.petted.is_set():
                     enter_petted()
                 else:
-                    reset_to_scan()
+                    reset_to_scan(RETRY_DELAY)
                     state = State.SCANNING
                 continue
 
