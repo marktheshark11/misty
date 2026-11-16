@@ -11,3 +11,5 @@ misty-python-sdk/.sdk-git-backup/
 .env
 .env.*
 misty_capture.*
+knobs.json
+ui_config.json

@@ -2,6 +2,23 @@
 
 The main program has Misty scan for a face, then turn and drive toward the person while keeping eye contact, stopping about 2 m in front of them (and backing up if they step closer). Once there, Misty takes a picture, waves, and says “Hi, I’m Misty!” It asks Ollama to identify a visible clothing color and item, gives a compliment, then asks to be petted every 3 seconds until one of the head touch sensors is touched. No name listening is enabled right now. No FastAPI server or `robot_image_rec` repo is needed.
 
+## Control panel
+
+A local browser panel to start/stop the behaviours, tune the `approach_face.py` knobs and drive Misty by hand. With `MISTY_IP` set as in section 2 and the virtual environment active:
+
+```powershell
+python .\server.py
+```
+
+Then open <http://127.0.0.1:8000> (the server only listens on this PC). To try it without a robot, run a stub in one window and point the server at it in another:
+
+```powershell
+python .\fake_misty.py
+$env:MISTY_IP = "127.0.0.1:8001"; python .\server.py
+```
+
+(macOS/Linux: `python fake_misty.py` then `MISTY_IP=127.0.0.1:8001 python server.py`.) The first run on the real robot should be supervised with the floor clear.
+
 ## 1. Install and start Ollama
 
 Install Ollama for Windows from [ollama.com/download](https://ollama.com/download), then open the Ollama app. The app runs Ollama's local API in the background.

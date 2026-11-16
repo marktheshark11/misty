@@ -8,6 +8,8 @@ the person. If it sees no face it backs away and forgets the face so the caller 
 again. Used by main.py; can also be run on its own.
 """
 
+import json
+import os
 import threading
 import time
 
@@ -45,6 +47,15 @@ OBSTACLE_STALE_AFTER = 0.5
 LOOK_UP_TIME = 2.0        # seconds to look up for a face before deciding it's an object
 BACK_AWAY_TIME = 1.5      # seconds of reversing at BACKUP_SPEED when it is an object
 LOOP_PERIOD = 0.15
+
+# Overrides written by the control panel (server.py); missing/invalid file = defaults.
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "knobs.json")) as _f:
+        for _k, _v in json.load(_f).items():
+            if _k.isupper() and _k in globals() and not callable(globals()[_k]):
+                globals()[_k] = tuple(_v) if isinstance(globals()[_k], tuple) else _v
+except Exception:
+    pass
 
 
 def estimate_distance(raw, previous=None):
