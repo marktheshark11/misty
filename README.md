@@ -2,6 +2,8 @@
 
 Run `main.py` to have Misty scan for a face. When she sees one, she says “I see you,” takes a picture, and starts approaching while the picture is analyzed. At the estimated 1–1.5 m range, she stops, waves, and says “Hi, I'm Misty!” If the picture analysis is still running, she says “Trying to think of a compliment,” then gives a brief compliment when a visible clothing detail is available. If she cannot find one, she says “I couldnt think of a compliment, sorry.” She waits two seconds after that step before asking to be petted until a head touch sensor is activated. After a head pet, Misty says “Thank you!”, displays `e_love.jpg`, and stays still in that state until the program is stopped.
 
+After the camera face appears for a photo, Misty shows her face-detection eyes again while the person is still visible. If the person is gone, she returns to idle eyes.
+
 There are two versions of the program. They run the same interaction from the same code and differ only in where faces are detected:
 
 - `main.py` uses Misty's on-board face detection.

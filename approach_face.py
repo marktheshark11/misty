@@ -5,7 +5,7 @@ import time
 
 from mistyPy.Events import Events
 
-from face_utils import get_property
+from face_utils import FACE_ACTIVE_WINDOW, get_property
 from misty_camera import take_picture
 
 # --- Calibration and movement settings ---
@@ -88,7 +88,10 @@ class FaceApproach:
         time.sleep(seconds)
 
     def take_picture(self) -> bytes:
-        return take_picture(self.misty)
+        return take_picture(
+            self.misty,
+            face_visible=lambda: self.seconds_since_face() <= FACE_ACTIVE_WINDOW,
+        )
 
     def register(self) -> None:
         self.misty.register_event(
