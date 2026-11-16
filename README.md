@@ -122,7 +122,7 @@ python .\stream_faces.py --webcam  # try it with this computer's camera
 ```
 
 Misty sticks to one face. It starts with the biggest face, then keeps following that same face as it moves, even if someone else comes closer. It only picks a new face after the followed one has been gone for `LOCK_TIMEOUT` (0.7 s). In the viewer, the followed face is red, with its distance and bearing estimate, and ignored faces are grey. Knobs at the top of `stream_faces.py`:
-- **`ROTATE`:** set it if the picture comes out sideways.
+- **`ROTATE`:** Misty's stream arrives turned 90°, so it is rotated clockwise by default. Set it to `None` if your picture comes out sideways.
 - **`SCORE_THRESHOLD`:** raise it if it finds faces that aren't there.
 - **`FACE_WIDTH_CM`:** change it if distances are off. Stand 2 m away and multiply it by 2 / shown distance. Alternatively, use the panel's `FACE_DISTANCE_SCALE` as before.
 - **`CAMERA_HFOV`:** change it if Misty over- or under-turns toward faces.

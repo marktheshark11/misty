@@ -28,8 +28,8 @@ STREAM_PORT = 1936
 WIDTH, HEIGHT, FPS = 640, 480, 30
 SCORE_THRESHOLD = 0.7  # lower finds more faces (and more false ones)
 HOLD_SECONDS = 0.3     # viewer only: keep the last box this long when one frame misses
-ROTATE = None          # e.g. cv2.ROTATE_90_CLOCKWISE if the stream comes out sideways
-CAMERA_HFOV = 70.0     # degrees, horizontal field of view of the streamed picture
+ROTATE = cv2.ROTATE_90_CLOCKWISE  # Misty's stream arrives sideways; None if yours is upright
+CAMERA_HFOV = 70.0     # degrees, field of view across the camera's long side
 FACE_WIDTH_CM = 15.0   # real width of a detected face box; scales the distance guess
 MAX_JUMP = 1.5         # a face counts as the same one if it moved < this many face widths per frame
 LOCK_TIMEOUT = 0.7     # seconds the followed face can be missing before another face is picked
@@ -119,7 +119,8 @@ def face_event(box, frame_w, frame_h):
     distance: centimetres, like Misty's raw Distance (approach_face scales it by 0.01).
     """
     x, y, w, h = map(float, box)
-    focal = (frame_w / 2) / math.tan(math.radians(CAMERA_HFOV) / 2)
+    # Same lens whichever way the picture is turned, so measure from the long side.
+    focal = (max(frame_w, frame_h) / 2) / math.tan(math.radians(CAMERA_HFOV) / 2)
     cx, cy = x + w / 2, y + h / 2
     return {"message": {
         "bearing": math.degrees(math.atan((frame_w / 2 - cx) / focal)),
@@ -287,6 +288,9 @@ def self_check():
     assert low["elevation"] > 0, "face low in the picture = positive elevation"
     near, far = (face_event((300, 220, w, w), 640, 480)["message"]["distance"] for w in (200, 50))
     assert near < far, "bigger face = closer"
+    landscape = face_event((0, 220, 40, 40), 640, 480)["message"]["bearing"]
+    portrait = face_event((0, 300, 40, 40), 480, 640)["message"]["bearing"]
+    assert portrait < landscape, "portrait picture is narrower, so its edge is a smaller angle"
 
     lock = FaceLock()
     a, b = (100, 100, 50, 50), (400, 100, 80, 80)  # b is bigger
