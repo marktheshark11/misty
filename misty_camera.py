@@ -1,8 +1,13 @@
 import base64
+import time
 
 
 def take_picture(misty) -> bytes:
     """Capture an image and return the decoded JPEG bytes."""
+
+    misty.display_image(fileName="e_System_camera.jpg")
+
+
     print("Taking picture...")
     response = misty.take_picture(
         base64=True,
@@ -29,5 +34,6 @@ def take_picture(misty) -> bytes:
 
     if image_base64.startswith("data:") and "," in image_base64:
         image_base64 = image_base64.split(",", 1)[1]
-
+    time.sleep(0.2)
+    misty.display_image(fileName="e_DefaultContent.jpg")
     return base64.b64decode(image_base64)
