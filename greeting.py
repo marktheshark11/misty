@@ -10,7 +10,6 @@ from misty_camera import take_picture
 from ollama_client import describe_person
 
 PET_REQUEST_DELAY = 2.0
-MAX_PHOTO_ATTEMPTS = 2
 
 
 class Greeting:
@@ -110,22 +109,18 @@ class Greeting:
             self._photo = self._take_photo()
             if self.shutting_down.is_set():
                 return
-            self._start_description(self._photo)
+            interaction_id = self._interaction_id
+            threading.Thread(
+                target=self._describe_photo,
+                args=(self._photo, interaction_id),
+                daemon=True,
+            ).start()
             self.photo_captured.set()
         except Exception as error:
             print(f"Could not take the picture: {error}")
             self.done.set()
         finally:
             self.photo_capture_done.set()
-
-    def _start_description(self, photo: bytes) -> None:
-        self._detail = None
-        self.description_done.clear()
-        threading.Thread(
-            target=self._describe_photo,
-            args=(photo, self._interaction_id),
-            daemon=True,
-        ).start()
 
     def _describe_photo(self, photo: bytes, interaction_id: int) -> None:
         try:
@@ -147,30 +142,13 @@ class Greeting:
             self._speak_and_wait("Hi, I'm Misty!")
             if self.shutting_down.is_set():
                 return
-            waiting_line_said = False
-            for attempt in range(MAX_PHOTO_ATTEMPTS):
-                if not self.description_done.is_set() and not waiting_line_said:
-                    self._speak_and_wait("Trying to think of a compliment")
-                    waiting_line_said = True
-                while not self.description_done.wait(0.1):
-                    if self.shutting_down.is_set():
-                        return
+            if not self.description_done.is_set():
+                self._speak_and_wait("Trying to think of a compliment")
+            while not self.description_done.wait(0.1):
                 if self.shutting_down.is_set():
                     return
-                if self._detail and self._detail != "clothes":
-                    break
-                if attempt + 1 == MAX_PHOTO_ATTEMPTS:
-                    break
-                print("No clear compliment from the photo; taking another picture...")
-                try:
-                    photo = self._take_photo()
-                except Exception as error:
-                    print(f"Could not retake the picture: {error}")
-                    break
-                if self.shutting_down.is_set():
-                    return
-                self._photo = photo
-                self._start_description(photo)
+            if self.shutting_down.is_set():
+                return
             if self._detail and self._detail != "clothes":
                 phrase = f"Nice to meet you. I like your {self._detail}."
                 print(f"Misty says: {phrase}")
