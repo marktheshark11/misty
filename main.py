@@ -24,6 +24,7 @@ from settings import MISTY_IP
 
 NEUTRAL_PITCH = -15
 PETTED_IMAGE = "e_love.jpg"
+FACE_LOST_PHRASE = "Oh, where did you go?"
 
 
 class State(Enum):
@@ -71,6 +72,14 @@ def run(misty, approach) -> None:
             units="degrees",
         ).raise_for_status()
         greeting_started_for_face = False
+
+    def say_face_lost() -> None:
+        # Called once the interrupted greeting has gone quiet, so it isn't cut off.
+        print(f"Misty says: {FACE_LOST_PHRASE}")
+        try:
+            misty.speak(FACE_LOST_PHRASE, flush=True, language="en-US").raise_for_status()
+        except Exception as error:
+            print(f"Could not say the face-lost line: {error}")
 
     def enter_petted() -> None:
         nonlocal state
@@ -163,6 +172,7 @@ def run(misty, approach) -> None:
                     returning_to_scan = True
                 if greeting.done.is_set():
                     returning_to_scan = False
+                    say_face_lost()
                     reset_to_scan()
                     state = State.SCANNING
                 else:
@@ -172,6 +182,7 @@ def run(misty, approach) -> None:
             if returning_to_scan:
                 if greeting.done.is_set():
                     returning_to_scan = False
+                    say_face_lost()
                     reset_to_scan()
                     state = State.SCANNING
                 else:

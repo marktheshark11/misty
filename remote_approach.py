@@ -10,6 +10,7 @@ import time
 
 from approach_face import DISTANCE_SMOOTHING, MAX_ESTIMATE, FaceApproach
 from face_session import FaceSession
+from misty_camera import restore_face, show_camera_face
 
 # Misty's on-board face events report bearing and elevation as roughly -13..13 from one
 # edge of the picture to the other, and the approach gains are tuned for that. The PC
@@ -18,6 +19,10 @@ ANGLE_SCALE = 13.0 / 35.0
 # Typical width of a detected face box, in metres. Distance is estimated from how wide
 # the face appears; if the printed distance reads too far, lower this, and vice versa.
 FACE_WIDTH_M = 0.15
+# Misty's own camera takes about this long to return a picture, during which the
+# on-board version shows the camera face. A frame from the stream is instant, so the
+# camera face is held this long to look the same.
+PHOTO_FACE_TIME = 1.0
 
 
 class RemoteFaceApproach(FaceApproach):
@@ -47,8 +52,14 @@ class RemoteFaceApproach(FaceApproach):
             self._on_result(self.session.step(timeout=remaining))
 
     def take_picture(self) -> bytes:
-        # Misty's camera is busy streaming, so the photo comes from the stream.
-        return self.session.jpeg()
+        # Misty's camera is busy streaming, so the photo comes from the stream. The face
+        # changes are the same ones misty_camera.take_picture shows.
+        show_camera_face(self.misty)
+        print("Taking picture...")
+        photo = self.session.jpeg()
+        time.sleep(PHOTO_FACE_TIME)
+        restore_face(self.misty)
+        return photo
 
     def _on_result(self, result) -> None:
         if result is None or result.target is None:
