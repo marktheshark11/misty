@@ -55,6 +55,7 @@ $env:OLLAMA_MODEL = "qwen2.5vl:3b"
 - `main.py` is the entry point for on-board face detection, and holds the scanning, approach, greeting, and cleanup loop that both versions run.
 - `main_remote.py` is the entry point for face detection on this PC.
 - `remote_approach.py` feeds the PC's face tracker into the approach logic in place of Misty's face events.
+- `person_photo.py` marks and crops the tracked person for the compliment, and saves both pictures in `recent_images/`.
 - `face_session.py`, `face_tracker.py`, `misty_stream.py`, and `face_models.py` stream Misty's camera to this PC, detect faces, and keep the lock on one person.
 - `head_controller.py` points Misty's head at a tracked face. `main_remote.py` doesn't use it, because it moves the head and body the same way as `main.py`.
 - `head_check.py` is a diagnostic that tests whether Misty's head responds to commands.
@@ -68,6 +69,8 @@ $env:OLLAMA_MODEL = "qwen2.5vl:3b"
 ## Face detection on this PC
 
 With `main_remote.py`, Misty streams her camera to this PC over RTSP (640x480, 24 fps by default). The PC turns each frame upright, detects faces with OpenCV's YuNet model, and locks onto one person with an SFace face embedding, so other people in view are ignored. The face's position and apparent size replace the bearing, elevation, and distance that Misty's own face events provide; the turning, driving, and stopping logic is the same code as in `main.py`.
+
+For the compliment, the tracked person is marked with a green rectangle and the picture is cropped to it, so the vision model only sees the person Misty is following even when others are in view. Two files in `recent_images/` are overwritten on every photo: `full.jpg` (the whole picture with the rectangle) and `person.jpg` (the crop that is sent to the model). Only the face is detected, so the rectangle is estimated from the face; its proportions are the three values near the top of `person_photo.py`.
 
 The first run downloads about 40 MB of face models into `models/`. On exit, the script stops the stream and turns Misty's camera service back on. If a run crashes, the camera may be left in streaming mode: run the script again and stop it with `Ctrl+C`, or restart Misty.
 

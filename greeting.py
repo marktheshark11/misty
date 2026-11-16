@@ -33,6 +33,7 @@ class Greeting:
         self._worker_lock = threading.Lock()
         self._active_workers = 0
         self._compliment_started = False
+        self._announce = True
         self._speech_event_index = 0
         self._photo = None
         self._detail = None
@@ -46,8 +47,13 @@ class Greeting:
             callback_function=lambda event: self._on_touch_event(event),
         )
 
-    def start(self) -> None:
-        """Capture the photo before the approach begins."""
+    def start(self, announce: bool = True) -> None:
+        """Capture the photo before the approach begins.
+
+        announce=False skips the "I see you" line, which is said for the first face of
+        a run and again after a face was lost mid-interaction.
+        """
+        self._announce = announce
         self.head_petted.clear()
         self.petted.clear()
         self.shutting_down.clear()
@@ -102,9 +108,10 @@ class Greeting:
 
     def _capture_photo(self) -> None:
         try:
-            self._speak_and_wait("I see you")
-            if self.shutting_down.is_set():
-                return
+            if self._announce:
+                self._speak_and_wait("I see you")
+                if self.shutting_down.is_set():
+                    return
             print("Taking a picture before approaching...")
             self._photo = self._take_photo()
             if self.shutting_down.is_set():

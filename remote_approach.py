@@ -12,6 +12,7 @@ from approach_face import DISTANCE_SMOOTHING, MAX_ESTIMATE, FaceApproach
 from face_session import FaceSession
 from face_utils import FACE_ACTIVE_WINDOW
 from misty_camera import restore_face, show_camera_face
+from person_photo import save_tracked_photo
 
 # Misty's on-board face events report bearing and elevation as roughly -13..13 from one
 # edge of the picture to the other, and the approach gains are tuned for that. The PC
@@ -53,12 +54,27 @@ class RemoteFaceApproach(FaceApproach):
             self._on_result(self.session.step(timeout=remaining))
 
     def take_picture(self) -> bytes:
+        """Return a JPEG of the tracked person, cut out of the stream.
+
+        Raises RuntimeError, without taking a photo, if nobody is being tracked.
+
+        The person is marked with a rectangle and the picture is cropped to it, so the
+        compliment is about them even when other people are in view. Both the marked
+        picture and the crop are saved in the recent_images folder (see person_photo.py).
+        """
+        # No tracked person means no photo: a picture of the whole scene would bring back
+        # the problem of the model not knowing who to compliment. Raising here makes the
+        # greeting report the failure and the main loop return to scanning.
+        view = self.session.tracked_view()
+        if view is None:
+            raise RuntimeError("nobody is being tracked, so no photo was taken")
         # Misty's camera is busy streaming, so the photo comes from the stream. The face
         # changes are the same ones misty_camera.take_picture shows.
         show_camera_face(self.misty)
         try:
             print("Taking picture...")
-            photo = self.session.jpeg()
+            photo = save_tracked_photo(*view)
+            print("Saved the tracked person's picture in recent_images.")
             time.sleep(PHOTO_FACE_TIME)
             return photo
         finally:
