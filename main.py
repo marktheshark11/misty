@@ -47,6 +47,9 @@ def run(misty, approach) -> None:
     eyes_showing_face = False
     detection_started = False
     greeting_started_for_face = False
+    # True once "I see you" has been said. It is said for the first face detected and
+    # never again for the rest of the run.
+    face_announced = False
     returning_to_scan = False
     next_attempt_at = 0.0
     missing_distance_since = None
@@ -139,7 +142,8 @@ def run(misty, approach) -> None:
                         approach.wait(LOOP_PERIOD)
                         continue
                     print("Face detected; taking a picture before tracking and approaching.")
-                    greeting.start()
+                    greeting.start(announce=not face_announced)
+                    face_announced = True
                     greeting_started_for_face = True
                     state = State.CAPTURING_PHOTO
                     continue

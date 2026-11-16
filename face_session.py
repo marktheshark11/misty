@@ -71,6 +71,9 @@ class FaceSession:
         self._last_tracked = 0.0
         self._eyes_show_face = None
         self._frame = None
+        # The newest frame in which the tracked person was actually seen, with their
+        # face box; None while nobody is being tracked.
+        self._tracked_view = None
         self._seq = 0
         self._stats = [time.monotonic(), 0, 0.0, 0, 0]
         self._fps = self._proc_ms = 0.0
@@ -167,6 +170,10 @@ class FaceSession:
         if self.follow:
             self.set_eyes(is_following(result))
         self._frame, self.result = frame, result
+        if result.target is not None:
+            self._tracked_view = (frame, result.target.box)
+        elif result.state == SEARCHING:
+            self._tracked_view = None
 
         self._update_stats(result, time.monotonic() - started)
         if self.preview and self._draw_preview(frame, result) == ord("q"):
@@ -191,6 +198,13 @@ class FaceSession:
                 print(f"Stream orientation: rotating frames {best_rotation} degrees clockwise "
                       f"(set MISTY_STREAM_ROTATE={best_rotation} to skip this check).")
         return TrackResult(SEARCHING)
+
+    def tracked_view(self):
+        """The newest frame showing the tracked person, and their face box.
+
+        Returns (frame, (x, y, width, height)), or None while nobody is being tracked.
+        """
+        return self._tracked_view
 
     def jpeg(self, quality: int = 85) -> bytes:
         """The most recently processed frame as JPEG (replaces take_picture while streaming)."""

@@ -11,6 +11,7 @@ misty-python-sdk/.sdk-git-backup/
 .env
 .env.*
 misty_capture.*
+recent_images/
 
 # Downloaded face models
 models/
