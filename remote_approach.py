@@ -55,11 +55,13 @@ class RemoteFaceApproach(FaceApproach):
         # Misty's camera is busy streaming, so the photo comes from the stream. The face
         # changes are the same ones misty_camera.take_picture shows.
         show_camera_face(self.misty)
-        print("Taking picture...")
-        photo = self.session.jpeg()
-        time.sleep(PHOTO_FACE_TIME)
-        restore_face(self.misty)
-        return photo
+        try:
+            print("Taking picture...")
+            photo = self.session.jpeg()
+            time.sleep(PHOTO_FACE_TIME)
+            return photo
+        finally:
+            restore_face(self.misty)
 
     def _on_result(self, result) -> None:
         if result is None or result.target is None:

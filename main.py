@@ -52,6 +52,8 @@ def run(misty, approach) -> None:
     missing_distance_since = None
     pitch_index = 0
     yaw_index = 0
+    scan_head_pitch = NEUTRAL_PITCH
+    scan_head_yaw = 0
 
     def face_seen_recently() -> bool:
         return approach.seconds_since_face() <= FACE_ACTIVE_WINDOW
@@ -65,7 +67,7 @@ def run(misty, approach) -> None:
         eyes_showing_face = face_seen
 
     def reset_to_scan(retry_delay: float = 0.0) -> None:
-        nonlocal greeting_started_for_face, next_attempt_at
+        nonlocal greeting_started_for_face, next_attempt_at, scan_head_pitch, scan_head_yaw
         approach.halt()
         set_face_eyes(False)
         misty.move_head(
@@ -77,6 +79,8 @@ def run(misty, approach) -> None:
         ).raise_for_status()
         greeting_started_for_face = False
         next_attempt_at = time.monotonic() + retry_delay
+        scan_head_pitch = NEUTRAL_PITCH
+        scan_head_yaw = 0
 
     def say_face_lost() -> None:
         # Called once the interrupted greeting has gone quiet, so it isn't cut off.
@@ -138,7 +142,11 @@ def run(misty, approach) -> None:
                     if time.monotonic() < next_attempt_at:
                         approach.wait(LOOP_PERIOD)
                         continue
-                    print("Face detected; taking a picture before tracking and approaching.")
+                    print("Face detected; turning toward the person before taking a picture.")
+                    if not approach.aim_for_photo(scan_head_pitch, scan_head_yaw):
+                        print("Face moved before the photo; resuming the scan.")
+                        reset_to_scan(2.0)
+                        continue
                     greeting.start()
                     greeting_started_for_face = True
                     state = State.CAPTURING_PHOTO
@@ -154,6 +162,8 @@ def run(misty, approach) -> None:
                     duration=MOVE_DURATION,
                     units="degrees",
                 ).raise_for_status()
+                scan_head_pitch = pitch
+                scan_head_yaw = yaw
                 deadline = time.monotonic() + MOVE_DURATION
                 while time.monotonic() < deadline and not face_seen_recently():
                     approach.wait(0.1)
@@ -201,7 +211,7 @@ def run(misty, approach) -> None:
                 if greeting.photo_capture_done.is_set():
                     if greeting.photo_captured.is_set():
                         print("Photo captured; tracking and approaching the person.")
-                        approach.face_forward(PITCH_POSITIONS[pitch_index])
+                        approach.face_forward(approach.pitch)
                         missing_distance_since = None
                         state = State.APPROACHING
                     else:

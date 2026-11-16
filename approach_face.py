@@ -25,7 +25,12 @@ BEARING_SIGN = 1         # flip to -1 if Misty turns away from the face
 PITCH_GAIN = 0.4         # head pitch degrees per degree of face elevation
 ELEVATION_SIGN = 1       # flip to -1 if the head tilts away from the face
 PITCH_LIMITS = (-40, 25)
+YAW_LIMITS = (-81, 81)
 START_PITCH = -15
+PHOTO_YAW_GAIN = 2.0  # degrees of head yaw per unit of face bearing
+PHOTO_PITCH_GAIN = 0.6
+PHOTO_MOVE_DURATION = 0.45
+PHOTO_FACE_MAX_AGE = 1.5
 FACE_LOST_AFTER = 1.0   # stop the wheels after this long without a face event
 DISTANCE_LOG_EVERY = 2.0
 LOOP_PERIOD = 0.15
@@ -137,6 +142,37 @@ class FaceApproach:
                 self.face["distance"] is not None
                 and time.monotonic() - self.face["distance_seen"] <= DISTANCE_STALE_AFTER
             )
+
+    def aim_for_photo(self, pitch: float, yaw: float) -> bool:
+        """Nudge the head toward the face and let it settle before a photo."""
+        with self.lock:
+            bearing = self.face["bearing"]
+            elevation = self.face["elevation"]
+            seen = self.face["seen"]
+        if time.monotonic() - seen > PHOTO_FACE_MAX_AGE:
+            return False
+
+        for correction in range(2):
+            yaw = max(YAW_LIMITS[0], min(YAW_LIMITS[1],
+                      yaw + BEARING_SIGN * PHOTO_YAW_GAIN * bearing))
+            pitch = max(PITCH_LIMITS[0], min(PITCH_LIMITS[1],
+                        pitch + ELEVATION_SIGN * PHOTO_PITCH_GAIN * elevation))
+            self.pitch = pitch
+            self.misty.move_head(
+                pitch=pitch, roll=0, yaw=yaw,
+                duration=PHOTO_MOVE_DURATION, units="degrees",
+            ).raise_for_status()
+            self.wait(PHOTO_MOVE_DURATION + 0.15)
+
+            with self.lock:
+                new_seen = self.face["seen"]
+                bearing = self.face["bearing"]
+                elevation = self.face["elevation"]
+            if correction == 1 or new_seen <= seen or (abs(bearing) <= 2 and abs(elevation) <= 2):
+                break
+            seen = new_seen
+
+        return self.seconds_since_face() <= PHOTO_FACE_MAX_AGE
 
     def face_forward(self, pitch: float) -> None:
         """Set the head pitch and center its yaw before the body turns."""
