@@ -153,6 +153,10 @@ class Greeting:
                 phrase = f"Nice to meet you. I like your {self._detail}."
                 print(f"Misty says: {phrase}")
                 self._speak_and_wait(phrase)
+            else:
+                phrase = "I couldnt think of a compliment, sorry"
+                print(f"Misty says: {phrase}")
+                self._speak_and_wait(phrase)
             if self.shutting_down.is_set():
                 return
             self.compliment_done.set()
