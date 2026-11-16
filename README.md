@@ -1,115 +1,58 @@
-# Misty image recognition
+# Misty face greeting
 
-The main program has Misty scan for a face, then turn and drive toward the person while keeping eye contact, stopping about 1 m in front of them (and backing up if they step closer). Once there, Misty takes a picture, waves, and says “Hi, I’m Misty!” It asks Ollama to identify a visible clothing color and item, gives a compliment, then asks to be petted every 3 seconds until one of the head touch sensors is touched. No name listening is enabled right now. No FastAPI server or `robot_image_rec` repo is needed.
+Run `main.py` to have Misty scan for a face, approach to about 1 m, take a picture, wave, introduce herself, and give a brief compliment based on visible clothing. She then asks to be petted until a head touch sensor is activated. When the person is no longer detected, Misty returns to scanning.
 
-## 1. Install and start Ollama
+## Setup
 
-Install Ollama for Windows from [ollama.com/download](https://ollama.com/download), then open the Ollama app. The app runs Ollama's local API in the background.
+1. Install [Ollama for Windows](https://ollama.com/download), start it, and download the vision model:
 
-Open PowerShell and download the vision model used by the script:
+   ```powershell
+   ollama pull qwen2.5vl:3b
+   ```
 
-```powershell
-ollama pull qwen2.5vl:3b
-```
+2. Set Misty's IP address in PowerShell. The PC and robot must be on the same network:
 
-You can confirm the model is installed with:
+   ```powershell
+   $env:MISTY_IP = "MISTY_IP_ADDRESS"
+   ```
 
-```powershell
-ollama list
-```
+3. Create the virtual environment and install dependencies:
 
-The script expects Ollama's API at `http://127.0.0.1:11434`. Check that it responds:
+   ```powershell
+   py -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   python -m pip install --upgrade pip
+   python -m pip install -e .\misty-python-sdk requests
+   ```
 
-```powershell
-Invoke-RestMethod http://127.0.0.1:11434/api/tags
-```
+   If PowerShell blocks activation, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in that window, then activate again.
 
-If the Ollama app is not running, start it from the Start menu. If you use Ollama without the app, start its server in a separate PowerShell window with `ollama serve` and leave that window open.
+4. Ensure Ollama is running, then start Misty's behavior:
 
-## 2. Set Misty's IP address
+   ```powershell
+   python .\main.py
+   ```
 
-In PowerShell, set `MISTY_IP` to Misty's IP address. The PC and Misty need to be on the same network, and the PC must be able to reach that address. This setting lasts for the current PowerShell window:
-
-```powershell
-$env:MISTY_IP = "MISTY_IP_ADDRESS"
-```
-
-## 3. Set up Python
-
-From this folder, create and activate a virtual environment, then install the Misty SDK and Python dependency:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .\misty-python-sdk requests
-```
-
-If PowerShell blocks activation, run this once in that PowerShell window, then activate again:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-```
-
-## 4. Run it
-
-Make sure the Ollama app/server is running and Misty is on and reachable. From this folder, with the virtual environment active, run:
-
-```powershell
-python .\main.py
-```
-
-The first run takes longer while Ollama loads the model. Misty scans until it detects a face, approaches, takes a picture, waves, introduces itself, gives a clothing compliment, then repeats its petting invitation every 3 seconds until a head touch sensor is activated. It speaks the result once for each face-detection session, then resumes scanning when the face is no longer detected.
-
-## Optional Ollama settings
-
-The defaults are `http://127.0.0.1:11434` and `qwen2.5vl:3b`. To use a different local Ollama host or model for one run:
+Press `Ctrl+C` to stop. The program connects to the local Ollama API at `http://127.0.0.1:11434`. Set `OLLAMA_HOST` or `OLLAMA_MODEL` in PowerShell to override the defaults. For example:
 
 ```powershell
 $env:OLLAMA_HOST = "http://127.0.0.1:11434"
 $env:OLLAMA_MODEL = "qwen2.5vl:3b"
-python .\main.py
 ```
-
-The model must be installed in Ollama first. For example, run `ollama pull qwen2.5vl:3b` to install the default model.
 
 ## Project files
 
-- `main.py` runs the idle scan, approach, photo capture, Ollama description, and speech. Run this file.
-- `approach_face.py` turns/drives Misty toward a face and holds ~1 m using the front distance sensor. Tuning knobs (speeds, stop distance, turn direction) are at the top. Can also run alone: `python .\approach_face.py`.
-- `misty_camera.py` captures the image from Misty and decodes it.
-- `ollama_client.py` sends the image to Ollama and reads the description.
-- `settings.py` contains the Misty IP, Ollama settings, and capture image filename.
-- `idle_mode.py` is a standalone face-aware idle scan that greets detected faces.
-- `follow_face.py` is a separate prototype that uses Misty's built-in face-following action.
-
-## Try the face-following prototype
-
-This prototype uses Misty's native `FOLLOW-FACE` action to track and center on a face. It shows `e_joy.jpg` when a face is detected and `e_defaultcontent.jpg` when no face has been seen recently. While face events show that a face is currently visible, it captures an image about every 10 seconds, asks local Ollama for a description, and has Misty speak it. It starts with the head tilted slightly upward and returns to that position when stopped. Ollama must be running with the `qwen2.5vl:3b` model installed. With the Python virtual environment active, run:
-
-```powershell
-python .\follow_face.py
-```
-
-Place one face in front of Misty in a well-lit area. Press `Ctrl+C` to stop. The program sends `STOP-FOLLOW` and removes the temporary actions it created. Keep Misty supervised while trying the behavior.
-
-## Run idle mode
-
-`idle_mode.py` runs on its own. Misty slowly looks up and down, then a little left and right. When it detects a face, it says “Hello” and uses its built-in face tracking to follow it. When the face is no longer visible, it returns to the idle scan. With the Python virtual environment active and `MISTY_IP` set, run:
-
-```powershell
-python .\idle_mode.py
-```
-
-Press `Ctrl+C` to stop.
+- `main.py` is the program entry point and coordinates scanning, approach, greeting, and cleanup.
+- `approach_face.py` handles face tracking and distance control. Adjust its tuning values near the top if needed.
+- `face_utils.py` holds shared scan settings and event helpers.
+- `misty_camera.py` captures images from Misty.
+- `ollama_client.py` requests a short clothing description from local Ollama.
+- `settings.py` reads Misty's IP address and the Ollama model name from environment variables.
 
 ## Troubleshooting
 
-- **Misty turns or tilts away from the face:** set `BEARING_SIGN` or `ELEVATION_SIGN` to `-1` in `approach_face.py`.
-- **Misty drives — keep the floor clear and stay close the first few runs.**
-
-- **`ollama` is not recognized:** reinstall Ollama or open a new PowerShell window after installing it.
-- **Connection refused at port 11434:** open the Ollama app, or start `ollama serve` in a separate terminal.
-- **Model not found:** run `ollama pull qwen2.5vl:3b`.
-- **Misty connection error:** set `MISTY_IP`, check Wi-Fi/network connectivity, and make sure Misty's REST API is reachable from this PC.
-- **Misty does not speak:** check the robot's volume/audio service and inspect the printed speech status/error.
+- If Misty turns or tilts away from a face, change `BEARING_SIGN` or `ELEVATION_SIGN` in `approach_face.py` to `-1`.
+- If `ollama` is not recognized, reinstall Ollama or open a new PowerShell window.
+- If Ollama refuses a connection, start the Ollama app or run `ollama serve` in a separate terminal.
+- If the model is missing, run `ollama pull qwen2.5vl:3b`.
+- If Misty cannot connect, check `MISTY_IP` and the network connection.

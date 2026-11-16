@@ -2,14 +2,12 @@
 
 import threading
 import time
-import json
-from pathlib import Path
 
 from mistyPy.Events import Events
 from mistyPy.Robot import Robot
 
 from approach_face import LOOP_PERIOD, FaceApproach
-from idle_mode import (
+from face_utils import (
     FACE_ACTIVE_WINDOW,
     FACE_IMAGE,
     IDLE_IMAGE,
@@ -23,15 +21,6 @@ from ollama_client import describe_person
 from settings import MISTY_IP
 
 NEUTRAL_PITCH = -15
-NAMES_FILE = Path(__file__).with_name("known_names.json")
-
-
-def load_names():
-    try:
-        data = json.loads(NAMES_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except (OSError, json.JSONDecodeError):
-        return {}
 
 
 def main() -> None:
@@ -45,7 +34,6 @@ def main() -> None:
     detection_started = False
     tracking_started = False
     description_attempted = False
-    known_names = load_names()
 
     def speak_and_wait(text: str) -> None:
         """Speak one line and wait for Misty's playback-complete event."""
@@ -121,12 +109,11 @@ def main() -> None:
             photo = take_picture(misty)
             wave()
             speak_and_wait("Hi, I'm Misty!")
-            name = "human"
             detail = describe_person(photo)
             if not detail:
                 print("Ollama found no specific visible detail to mention.")
             else:
-                phrase = f"Nice to meet you, {name}. I like your {detail}." if name else f"I like your {detail}."
+                phrase = f"Nice to meet you. I like your {detail}."
                 print(f"Misty says: {phrase}")
                 speak_and_wait(phrase)
             ask_to_be_petted()

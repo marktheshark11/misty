@@ -2,7 +2,7 @@
 
 Body turns to keep the face centered horizontally, the head pitches to keep it centered
 vertically, and the front-center time-of-flight sensor decides when to stop or back up.
-Used by main.py; can also be run on its own.
+Used by main.py.
 """
 
 import threading
@@ -10,10 +10,8 @@ import time
 
 from mistyPy.EventFilters import EventFilters
 from mistyPy.Events import Events
-from mistyPy.Robot import Robot
 
-from idle_mode import get_property
-from settings import MISTY_IP
+from face_utils import get_property
 
 # --- Calibration knobs (tune on the real robot) ---
 STOP_DISTANCE = 1.00   # metres from the front ToF sensor to the person
@@ -142,44 +140,3 @@ class FaceApproach:
         return distance is not None and BACKUP_DISTANCE <= distance <= STOP_DISTANCE
 
 
-def main():
-    misty = Robot(MISTY_IP)
-    approach = FaceApproach(misty)
-    detection_started = False
-    try:
-        approach.face_forward(START_PITCH)
-        approach.register()
-        time.sleep(0.5)
-        misty.start_face_detection().raise_for_status()
-        detection_started = True
-        print("Looking for a face. Press Ctrl+C to stop.")
-        while True:
-            approach.step()
-            time.sleep(LOOP_PERIOD)
-    except KeyboardInterrupt:
-        print("Stopping...")
-    finally:
-        try:
-            misty.stop()
-        except Exception as error:
-            print(f"Could not stop driving: {error}")
-        if detection_started:
-            try:
-                misty.stop_face_detection()
-            except Exception as error:
-                print(f"Could not stop face detection: {error}")
-        misty.unregister_all_events()
-
-
-def self_check():
-    assert drive_command(0, 0.95)[0] == 0, "holds inside the 90-100 cm band"
-    assert drive_command(0, 0.70)[0] == -BACKUP_SPEED, "backs up when too close"
-    assert drive_command(0, None)[0] == MAX_SPEED, "no ToF reading = far away"
-    assert MIN_SPEED <= drive_command(0, 1.15)[0] < MAX_SPEED, "slows down when close"
-    assert drive_command(20, 2.0)[0] == 0, "turns before driving when face is off-center"
-    assert drive_command(100, None)[1] == MAX_TURN * BEARING_SIGN, "turn is clamped"
-
-
-if __name__ == "__main__":
-    self_check()
-    main()
