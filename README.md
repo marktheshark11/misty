@@ -57,7 +57,6 @@ $env:OLLAMA_MODEL = "qwen2.5vl:3b"
 - `remote_approach.py` feeds the PC's face tracker into the approach logic in place of Misty's face events.
 - `person_photo.py` marks and crops the tracked person for the compliment, and saves both pictures in `recent_images/`.
 - `face_session.py`, `face_tracker.py`, `misty_stream.py`, and `face_models.py` stream Misty's camera to this PC, detect faces, and keep the lock on one person.
-- `head_controller.py` points Misty's head at a tracked face. `main_remote.py` doesn't use it, because it moves the head and body the same way as `main.py`.
 - `head_check.py` is a diagnostic that tests whether Misty's head responds to commands.
 - `greeting.py` handles the first spoken line, photo capture and analysis during approach, the arrival greeting and compliment, and the petting interaction.
 - `approach_face.py` handles face tracking and distance control. Adjust its tuning values near the top if needed.

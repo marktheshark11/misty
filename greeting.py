@@ -21,7 +21,6 @@ class Greeting:
         self.misty = misty
         # Returns JPEG bytes; defaults to Misty's own camera.
         self._take_photo = take_photo or (lambda: take_picture(misty))
-        self.head_petted = threading.Event()
         self.petted = threading.Event()
         self.shutting_down = threading.Event()
         self.photo_capture_done = threading.Event()
@@ -54,7 +53,6 @@ class Greeting:
         a run and again after a face was lost mid-interaction.
         """
         self._announce = announce
-        self.head_petted.clear()
         self.petted.clear()
         self.shutting_down.clear()
         self.photo_capture_done.clear()
@@ -158,12 +156,10 @@ class Greeting:
                 return
             if self._detail and self._detail != "clothes":
                 phrase = f"Nice to meet you. I like your {self._detail}."
-                print(f"Misty says: {phrase}")
-                self._speak_and_wait(phrase)
             else:
                 phrase = "I couldnt think of a compliment, sorry"
-                print(f"Misty says: {phrase}")
-                self._speak_and_wait(phrase)
+            print(f"Misty says: {phrase}")
+            self._speak_and_wait(phrase)
             if self.shutting_down.is_set():
                 return
             self.compliment_done.set()
@@ -224,7 +220,6 @@ class Greeting:
             and get_property(message, "isContacted", False)
             and self.waiting_for_pet.is_set()
         ):
-            self.head_petted.set()
             self.petted.set()
 
     def _wave(self) -> None:
@@ -233,10 +228,10 @@ class Greeting:
 
     def _ask_to_be_petted(self) -> None:
         self.waiting_for_pet.set()
-        while not self.head_petted.is_set() and not self.shutting_down.is_set():
+        while not self.petted.is_set() and not self.shutting_down.is_set():
             started = time.monotonic()
             self._speak_and_wait("Would you like to pet my head?")
             wait_time = max(0, 3.0 - (time.monotonic() - started))
             self.shutting_down.wait(wait_time)
-        if self.head_petted.is_set() and not self.shutting_down.is_set():
+        if self.petted.is_set() and not self.shutting_down.is_set():
             self._speak_and_wait("Thank you!")

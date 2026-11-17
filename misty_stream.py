@@ -8,6 +8,8 @@ import time
 
 import av
 
+from face_utils import best_effort
+
 # Low-latency RTSP: no input buffering, no reordering delay. The probe limits keep
 # FFmpeg's stream analysis (5 s by default) from eating the open timeout.
 RTSP_OPTIONS = {
@@ -72,14 +74,11 @@ def start_misty_stream(misty, port: int, width: int, height: int, fps: int, bitr
 
 def stop_misty_stream(misty) -> None:
     """Stop streaming and give the camera back to Misty (needed for TakePicture etc.)."""
-    for call, what in (
-        (misty.stop_av_streaming, "stop AV streaming"),
-        (misty.enable_camera_service, "re-enable the camera service"),
-    ):
-        try:
-            call().raise_for_status()
-        except Exception as error:
-            print(f"Could not {what}: {error}")
+    best_effort("stop AV streaming", lambda: misty.stop_av_streaming().raise_for_status())
+    best_effort(
+        "re-enable the camera service",
+        lambda: misty.enable_camera_service().raise_for_status(),
+    )
 
 
 class LatestFrameReader:
@@ -146,10 +145,6 @@ class LatestFrameReader:
             if not self._cond.wait_for(lambda: self._seq > after_seq, timeout=timeout):
                 return None
             return self._frame, self._time, self._seq
-
-    def latest(self):
-        with self._cond:
-            return None if self._frame is None else self._frame.copy()
 
     def close(self) -> None:
         self._running = False

@@ -8,9 +8,8 @@ detects faces and keeps a lock on one person (see face_session.py).
 
 import time
 
-from approach_face import DISTANCE_SMOOTHING, MAX_ESTIMATE, FaceApproach
+from approach_face import MAX_ESTIMATE, FaceApproach
 from face_session import FaceSession
-from face_utils import FACE_ACTIVE_WINDOW
 from misty_camera import restore_face, show_camera_face
 from person_photo import save_tracked_photo
 
@@ -30,14 +29,14 @@ PHOTO_FACE_TIME = 1.0
 class RemoteFaceApproach(FaceApproach):
     def __init__(self, misty, preview: bool = False):
         super().__init__(misty)
-        # follow=False: the session only watches. The head and wheels are driven by the
-        # inherited approach logic, exactly as with on-board detection.
-        self.session = FaceSession(misty, preview=preview, follow=False)
+        # The session only watches. The head and wheels are driven by the inherited
+        # approach logic, exactly as with on-board detection.
+        self.session = FaceSession(misty, preview=preview)
         self._started = False
 
     def start(self) -> None:
         self._started = True
-        self.session.__enter__()
+        self.session.start()
 
     def stop(self) -> None:
         if self._started:
@@ -78,22 +77,17 @@ class RemoteFaceApproach(FaceApproach):
             time.sleep(PHOTO_FACE_TIME)
             return photo
         finally:
-            restore_face(self.misty, self.seconds_since_face() <= FACE_ACTIVE_WINDOW)
+            restore_face(self.misty, self.face_seen_recently())
 
     def _on_result(self, result) -> None:
         if result is None or result.target is None:
             return  # No frame, or the person wasn't actually seen in this one.
-        frame = self.session._frame
-        metres = min(MAX_ESTIMATE, FACE_WIDTH_M * self.session.tracker.focal_px(frame.shape)
-                     / max(1.0, result.target.width_px))
-        now = time.monotonic()
-        with self.lock:
-            face = self.face
-            face["bearing"] = result.yaw * ANGLE_SCALE
-            face["elevation"] = result.pitch * ANGLE_SCALE
-            face["seen"] = now
-            previous = face["distance"]
-            face["distance"] = (metres if previous is None
-                                else previous + DISTANCE_SMOOTHING * (metres - previous))
-            face["raw_distance"] = round(metres, 2)
-            face["distance_seen"] = now
+        # A face looks smaller the further away it is, which gives the distance.
+        focal_px = self.session.tracker.focal_px(self.session.frame.shape)
+        metres = min(MAX_ESTIMATE, FACE_WIDTH_M * focal_px / max(1.0, result.target.width_px))
+        self._record_face(
+            result.yaw * ANGLE_SCALE,
+            result.pitch * ANGLE_SCALE,
+            metres,
+            raw_distance=round(metres, 2),
+        )

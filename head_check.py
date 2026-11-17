@@ -20,20 +20,14 @@ import requests
 from mistyPy.Events import Events
 from mistyPy.Robot import Robot
 
+from face_utils import NEUTRAL_PITCH
+from face_utils import get_property as _get
 from settings import MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_HEIGHT, STREAM_PORT, STREAM_WIDTH
 
-NEUTRAL_PITCH = -15
 lock = threading.Lock()
 latest = {}      # axis -> (time, value)
 counts = {}      # sensorId -> number of messages
 first_message = []
-
-
-def _get(data, name):
-    if not isinstance(data, dict):
-        return None
-    wanted = name.casefold()
-    return next((v for k, v in data.items() if k.casefold() == wanted), None)
 
 
 def on_actuator(event):

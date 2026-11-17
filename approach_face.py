@@ -5,35 +5,34 @@ import time
 
 from mistyPy.Events import Events
 
-from face_utils import FACE_ACTIVE_WINDOW, get_property
+from face_utils import FACE_ACTIVE_WINDOW, NEUTRAL_PITCH, get_property
 from misty_camera import take_picture
 
 # --- Calibration and movement settings ---
-BACKUP_DISTANCE = 1.00  # reverse if the camera estimate puts the person closer than this
-STOP_DISTANCE = 1.50    # stop approaching inside the 1-1.5 m comfort range
-SLOW_DISTANCE = 2.00    # begin slowing near the far edge of the range
-MAX_ESTIMATE = 5.00     # cap camera estimates at this distance, in metres
-FACE_DISTANCE_SCALE = 0.01  # converts the face event's raw distance to metres; calibrate on Misty
-DISTANCE_SMOOTHING = 0.3    # lower values smooth more, but react more slowly
-DISTANCE_STALE_AFTER = 1.0  # don't drive forward using an old camera estimate
-MAX_SPEED = 25          # drive linear velocity, percent of maximum
+BACKUP_DISTANCE = 1.00
+STOP_DISTANCE = 1.50
+SLOW_DISTANCE = 2.00
+MAX_ESTIMATE = 5.00
+FACE_DISTANCE_SCALE = 0.01
+DISTANCE_SMOOTHING = 0.3
+DISTANCE_STALE_AFTER = 1.0
+MAX_SPEED = 25
 MIN_SPEED = 15
 BACKUP_SPEED = 10
-TURN_GAIN = 2.5          # angular percent per degree of face bearing
+TURN_GAIN = 2.5
 MAX_TURN = 30
 BEARING_SIGN = 1         # flip to -1 if Misty turns away from the face
-PITCH_GAIN = 0.4         # head pitch degrees per degree of face elevation
+PITCH_GAIN = 0.4
 ELEVATION_SIGN = 1       # flip to -1 if the head tilts away from the face
 PITCH_LIMITS = (-40, 25)
-START_PITCH = -15
 FACE_LOST_AFTER = 1.0   # stop the wheels after this long without a face event
 DISTANCE_LOG_EVERY = 2.0
 LOOP_PERIOD = 0.15
 
 
-def estimate_distance(raw, previous=None):
-    """Convert the face event's raw range to smoothed metres."""
-    metres = min(MAX_ESTIMATE, float(raw) * FACE_DISTANCE_SCALE)
+def smooth_distance(metres, previous=None):
+    """Cap a distance estimate and blend it into the previous one, if there is one."""
+    metres = min(MAX_ESTIMATE, metres)
     if previous is None:
         return metres
     return previous + DISTANCE_SMOOTHING * (metres - previous)
@@ -56,6 +55,9 @@ def drive_command(bearing, distance):
     return max(MIN_SPEED, MAX_SPEED * fraction), angular
 
 
+_NO_READING = object()  # Marks "this sighting had no distance", as opposed to None.
+
+
 class FaceApproach:
     """Face event state plus one camera-distance control step."""
 
@@ -70,11 +72,10 @@ class FaceApproach:
             "distance_seen": 0.0,
             "seen": 0.0,
         }
-        self.pitch = START_PITCH
+        self.pitch = NEUTRAL_PITCH
         self.driving = False
         self.last_distance_log = 0.0
 
-    # ----- face source: Misty's on-board detection (RemoteFaceApproach replaces these) -----
     def start(self) -> None:
         self.register()
         time.sleep(0.5)
@@ -88,10 +89,7 @@ class FaceApproach:
         time.sleep(seconds)
 
     def take_picture(self) -> bytes:
-        return take_picture(
-            self.misty,
-            face_visible=lambda: self.seconds_since_face() <= FACE_ACTIVE_WINDOW,
-        )
+        return take_picture(self.misty, face_visible=self.face_seen_recently)
 
     def register(self) -> None:
         self.misty.register_event(
@@ -107,32 +105,51 @@ class FaceApproach:
         if bearing is None:
             return
 
-        now = time.monotonic()
+        elevation = float(get_property(message, "elevation", 0) or 0)
         raw_distance = get_property(message, "distance")
+        if raw_distance is None:
+            self._record_face(float(bearing), elevation)
+            return
+        try:
+            raw_distance = float(raw_distance)
+        except (TypeError, ValueError):
+            raw_distance = None
+        if raw_distance is not None and raw_distance > 0:
+            metres = raw_distance * FACE_DISTANCE_SCALE
+        else:
+            metres = None
+        self._record_face(float(bearing), elevation, metres, raw_distance)
+
+    def _record_face(self, bearing, elevation, metres=_NO_READING, raw_distance=None) -> None:
+        """Store one sighting of the face; this is the only place self.face is filled in.
+
+        metres is the measured distance: a number is blended into the running estimate,
+        None clears the estimate (an unusable reading), and leaving it out keeps the
+        estimate as it is (the sighting carried no distance at all).
+        """
+        now = time.monotonic()
         with self.lock:
-            self.face["bearing"] = float(bearing)
-            self.face["elevation"] = float(get_property(message, "elevation", 0) or 0)
-            self.face["seen"] = now
-            if raw_distance is not None:
-                try:
-                    raw_distance = float(raw_distance)
-                except (TypeError, ValueError):
-                    raw_distance = None
-                if raw_distance is not None and raw_distance > 0:
-                    self.face["raw_distance"] = raw_distance
-                    self.face["distance"] = estimate_distance(
-                        raw_distance,
-                        self.face["distance"],
-                    )
-                    self.face["distance_seen"] = now
-                else:
-                    self.face["raw_distance"] = raw_distance
-                    self.face["distance"] = None
-                    self.face["distance_seen"] = 0.0
+            face = self.face
+            face["bearing"] = bearing
+            face["elevation"] = elevation
+            face["seen"] = now
+            if metres is _NO_READING:
+                return
+            face["raw_distance"] = raw_distance
+            if metres is None:
+                face["distance"] = None
+                face["distance_seen"] = 0.0
+            else:
+                face["distance"] = smooth_distance(metres, face["distance"])
+                face["distance_seen"] = now
 
     def seconds_since_face(self) -> float:
         with self.lock:
             return time.monotonic() - self.face["seen"]
+
+    def face_seen_recently(self) -> bool:
+        """True while the face counts as present (short gaps between sightings allowed)."""
+        return self.seconds_since_face() <= FACE_ACTIVE_WINDOW
 
     def has_fresh_distance(self) -> bool:
         with self.lock:

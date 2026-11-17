@@ -7,9 +7,8 @@ if not MISTY_IP:
 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5vl:3b")
-CAPTURE_FILE = "misty_capture.jpg"
 
-# PC-side face tracking (follow_face.py). Misty streams video; this PC does the vision.
+# PC-side face tracking. Misty streams video; this PC does the vision.
 STREAM_PORT = int(os.getenv("MISTY_STREAM_PORT", "1936"))
 STREAM_WIDTH = int(os.getenv("MISTY_STREAM_WIDTH", "640"))
 STREAM_HEIGHT = int(os.getenv("MISTY_STREAM_HEIGHT", "480"))
@@ -26,11 +25,6 @@ if STREAM_TRANSPORT not in ("tcp", "udp"):
 STREAM_ROTATE = os.getenv("MISTY_STREAM_ROTATE", "auto").lower()
 if STREAM_ROTATE not in ("auto", "0", "90", "180", "270"):
     raise RuntimeError("MISTY_STREAM_ROTATE must be auto, 0, 90, 180 or 270.")
-# Field of view across the longer side of the streamed image, in degrees. Only scales
-# how strongly the head reacts; it doesn't need to be exact.
+# Field of view across the longer side of the streamed image, in degrees. Sets how face
+# positions convert to angles and how face size converts to distance.
 CAMERA_FOV = float(os.getenv("MISTY_CAMERA_FOV", "70"))
-# Fraction of the face's distance from the image centre that the head corrects per
-# second. Higher is snappier; too high and the head swings back and forth.
-TRACK_GAIN = float(os.getenv("MISTY_TRACK_GAIN", "1.5"))
-# Head velocity (percent of maximum) used for tracking moves.
-HEAD_VELOCITY = float(os.getenv("MISTY_HEAD_VELOCITY", "60"))
