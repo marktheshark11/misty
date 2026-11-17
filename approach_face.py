@@ -31,7 +31,6 @@ LOOP_PERIOD = 0.15
 
 
 def smooth_distance(metres, previous=None):
-    """Cap a distance estimate and blend it into the previous one, if there is one."""
     metres = min(MAX_ESTIMATE, metres)
     if previous is None:
         return metres
@@ -39,27 +38,25 @@ def smooth_distance(metres, previous=None):
 
 
 def drive_command(bearing, distance):
-    """Return linear and angular drive velocities for a face bearing and range."""
     angular = max(-MAX_TURN, min(MAX_TURN, BEARING_SIGN * TURN_GAIN * bearing))
     if distance is None:
-        return 0, angular  # turn to face the person, but never drive forward blind
+        return 0, angular
     if distance < BACKUP_DISTANCE:
         return -BACKUP_SPEED, angular
     if distance <= STOP_DISTANCE:
         return 0, angular
     if abs(bearing) > 8:
-        return 0, angular  # turn first when the face is far off-center
+        return 0, angular
     if distance >= SLOW_DISTANCE:
         return MAX_SPEED, angular
     fraction = (distance - STOP_DISTANCE) / (SLOW_DISTANCE - STOP_DISTANCE)
     return max(MIN_SPEED, MAX_SPEED * fraction), angular
 
 
-_NO_READING = object()  # Marks "this sighting had no distance", as opposed to None.
+_NO_READING = object()
 
 
 class FaceApproach:
-    """Face event state plus one camera-distance control step."""
 
     def __init__(self, misty):
         self.misty = misty
@@ -85,7 +82,6 @@ class FaceApproach:
         self.misty.stop_face_detection().raise_for_status()
 
     def wait(self, seconds: float) -> None:
-        """Pause the main loop; face events keep arriving in the background."""
         time.sleep(seconds)
 
     def take_picture(self) -> bytes:
@@ -148,7 +144,6 @@ class FaceApproach:
             return time.monotonic() - self.face["seen"]
 
     def face_seen_recently(self) -> bool:
-        """True while the face counts as present (short gaps between sightings allowed)."""
         return self.seconds_since_face() <= FACE_ACTIVE_WINDOW
 
     def has_fresh_distance(self) -> bool:
@@ -159,7 +154,6 @@ class FaceApproach:
             )
 
     def face_forward(self, pitch: float) -> None:
-        """Set the head pitch and center its yaw before the body turns."""
         self.pitch = pitch
         self.misty.move_head(pitch=pitch, roll=0, yaw=0, duration=0.5, units="degrees")
 
@@ -169,7 +163,6 @@ class FaceApproach:
             self.driving = False
 
     def step(self) -> bool:
-        """Update tracking and return True inside the 1-1.5 m stopping range."""
         now = time.monotonic()
         with self.lock:
             face_visible = now - self.face["seen"] <= FACE_LOST_AFTER

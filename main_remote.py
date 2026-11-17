@@ -1,8 +1,4 @@
 """Run the same interaction as main.py, with face detection on this PC.
-
-Misty streams her camera to this PC, which finds and tracks the face; everything else
-(scan, photo, approach, greeting, compliment, petting) is main.py's own code.
-Run with --preview to see what the tracker sees.
 """
 
 import argparse

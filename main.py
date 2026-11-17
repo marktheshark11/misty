@@ -39,16 +39,12 @@ class State(Enum):
 
 
 def run(misty, approach) -> None:
-    """Run the interaction. `approach` supplies the face data: FaceApproach for Misty's
-    on-board detection, RemoteFaceApproach for detection on this PC."""
     greeting = Greeting(misty, take_photo=approach.take_picture)
     bump_reset = BumpReset(misty)
     state = State.SCANNING
     eyes_showing_face = False
     detection_started = False
     greeting_started_for_face = False
-    # True once "I see you" has been said. It is said for the first face detected, and
-    # again only after Misty has lost someone and said the face-lost line.
     face_announced = False
     returning_to_scan = False
     next_attempt_at = 0.0
@@ -65,7 +61,6 @@ def run(misty, approach) -> None:
         eyes_showing_face = face_seen
 
     def reset_to_scan(retry_delay: float = 0.0) -> None:
-        """Stop, look straight ahead, and go back to scanning."""
         nonlocal state, greeting_started_for_face, next_attempt_at
         approach.halt()
         set_face_eyes(False)
@@ -76,8 +71,7 @@ def run(misty, approach) -> None:
 
     def say_face_lost() -> None:
         nonlocal face_announced
-        face_announced = False  # The next face found gets "I see you" again.
-        # Called once the interrupted greeting has gone quiet, so it isn't cut off.
+        face_announced = False
         print(f"Misty says: {FACE_LOST_PHRASE}")
         try:
             misty.speak(FACE_LOST_PHRASE, flush=True, language="en-US").raise_for_status()
@@ -105,7 +99,7 @@ def run(misty, approach) -> None:
         misty.display_image(IDLE_IMAGE).raise_for_status()
         greeting.register()
         bump_reset.register()
-        detection_started = True  # Set first so a failed start is still cleaned up.
+        detection_started = True
         approach.start()
 
         print("Idle scan is running. Press Ctrl+C to stop.")
@@ -172,7 +166,6 @@ def run(misty, approach) -> None:
                 returning_to_scan = True
 
             if returning_to_scan:
-                # Wait for the interrupted greeting to go quiet, even if the face is back.
                 if greeting.done.is_set():
                     returning_to_scan = False
                     say_face_lost()

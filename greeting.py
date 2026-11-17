@@ -48,9 +48,6 @@ class Greeting:
 
     def start(self, announce: bool = True) -> None:
         """Capture the photo before the approach begins.
-
-        announce=False skips the "I see you" line, which is said for the first face of
-        a run and again after a face was lost mid-interaction.
         """
         self._announce = announce
         self.petted.clear()
@@ -68,7 +65,6 @@ class Greeting:
         self._launch(self._capture_photo)
 
     def start_arrival_interaction(self) -> None:
-        """Speak the greeting and compliment, then begin the petting phase."""
         with self._worker_lock:
             if self._compliment_started or self.shutting_down.is_set():
                 return

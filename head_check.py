@@ -1,14 +1,4 @@
-"""Diagnose why Misty's head doesn't follow: run this once and paste the output.
 
-Tests, in order (about 30 seconds; watch Misty's head):
-  1. Are head-position (ActuatorPosition) events arriving?
-  2. Does the SDK's own move_head (lowercase keys, duration) move the head?
-  3. Lowercase keys with velocity (what face tracking sends now).
-  4. Capitalized keys with velocity (what face tracking sent before).
-  5. Rapid retargeting at ~12 commands/second (how face tracking drives the head).
-  6. The same rapid retargeting at ~3 commands/second.
-  7. Optional (--with-stream): repeat test 3 while Misty's video stream is running.
-"""
 
 from __future__ import annotations
 

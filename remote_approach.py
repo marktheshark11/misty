@@ -29,8 +29,6 @@ PHOTO_FACE_TIME = 1.0
 class RemoteFaceApproach(FaceApproach):
     def __init__(self, misty, preview: bool = False):
         super().__init__(misty)
-        # The session only watches. The head and wheels are driven by the inherited
-        # approach logic, exactly as with on-board detection.
         self.session = FaceSession(misty, preview=preview)
         self._started = False
 
@@ -44,7 +42,6 @@ class RemoteFaceApproach(FaceApproach):
             self.session.close()
 
     def wait(self, seconds: float) -> None:
-        """Pause the main loop while processing the camera frames that arrive meanwhile."""
         deadline = time.monotonic() + seconds
         while True:
             remaining = deadline - time.monotonic()
@@ -56,19 +53,10 @@ class RemoteFaceApproach(FaceApproach):
         """Return a JPEG of the tracked person, cut out of the stream.
 
         Raises RuntimeError, without taking a photo, if nobody is being tracked.
-
-        The person is marked with a rectangle and the picture is cropped to it, so the
-        compliment is about them even when other people are in view. Both the marked
-        picture and the crop are saved in the recent_images folder (see person_photo.py).
         """
-        # No tracked person means no photo: a picture of the whole scene would bring back
-        # the problem of the model not knowing who to compliment. Raising here makes the
-        # greeting report the failure and the main loop return to scanning.
         view = self.session.tracked_view()
         if view is None:
             raise RuntimeError("nobody is being tracked, so no photo was taken")
-        # Misty's camera is busy streaming, so the photo comes from the stream. The face
-        # changes are the same ones misty_camera.take_picture shows.
         show_camera_face(self.misty)
         try:
             print("Taking picture...")
@@ -81,8 +69,7 @@ class RemoteFaceApproach(FaceApproach):
 
     def _on_result(self, result) -> None:
         if result is None or result.target is None:
-            return  # No frame, or the person wasn't actually seen in this one.
-        # A face looks smaller the further away it is, which gives the distance.
+            return
         focal_px = self.session.tracker.focal_px(self.session.frame.shape)
         metres = min(MAX_ESTIMATE, FACE_WIDTH_M * focal_px / max(1.0, result.target.width_px))
         self._record_face(

@@ -10,8 +10,6 @@ import av
 
 from face_utils import best_effort
 
-# Low-latency RTSP: no input buffering, no reordering delay. The probe limits keep
-# FFmpeg's stream analysis (5 s by default) from eating the open timeout.
 RTSP_OPTIONS = {
     "fflags": "nobuffer",
     "flags": "low_delay",
@@ -20,11 +18,9 @@ RTSP_OPTIONS = {
     "analyzeduration": "2000000",
     "probesize": "1000000",
 }
-# TCP never shows smeared frames (which cause false detections) but stalls briefly when
-# Wi-Fi drops a packet; UDP never stalls but smears until the next keyframe. The
-# preferred one (MISTY_STREAM_TRANSPORT) is tried first, the other as a fallback.
+
 RTSP_TRANSPORTS = ("tcp", "udp")
-OPEN_TIMEOUT = 20.0  # Misty's encoder can take several seconds to emit its first keyframe.
+OPEN_TIMEOUT = 20.0
 READ_TIMEOUT = 5.0
 
 
@@ -47,10 +43,9 @@ def _check(response, what: str) -> None:
 
 
 def start_misty_stream(misty, port: int, width: int, height: int, fps: int, bitrate: int) -> None:
-    """Switch Misty from on-board vision to RTSP streaming (Misty hosts the server)."""
     _check(misty.enable_av_streaming_service(), "Enabling the AV streaming service")
     try:
-        misty.stop_av_streaming()  # Clear a stream left running by a crashed earlier run.
+        misty.stop_av_streaming()
     except Exception:
         pass
     try:
@@ -73,7 +68,6 @@ def start_misty_stream(misty, port: int, width: int, height: int, fps: int, bitr
 
 
 def stop_misty_stream(misty) -> None:
-    """Stop streaming and give the camera back to Misty (needed for TakePicture etc.)."""
     best_effort("stop AV streaming", lambda: misty.stop_av_streaming().raise_for_status())
     best_effort(
         "re-enable the camera service",
@@ -82,11 +76,6 @@ def stop_misty_stream(misty) -> None:
 
 
 class LatestFrameReader:
-    """Reads the RTSP stream continuously on a thread and keeps only the newest frame.
-
-    Draining the stream as fast as it arrives is what keeps latency low: the consumer
-    always gets the freshest frame, never a stale one queued in a buffer.
-    """
 
     def __init__(self, url: str, transport: str = "tcp"):
         self.url = url
@@ -114,11 +103,9 @@ class LatestFrameReader:
                 with av.open(self.url, options=options,
                              timeout=(OPEN_TIMEOUT, READ_TIMEOUT)) as container:
                     stream = container.streams.video[0]
-                    # Frame threading buffers several frames inside the decoder; slice
-                    # threading doesn't. That alone can save 100+ ms at 30 fps.
                     stream.codec_context.thread_type = "SLICE"
                     backoff = 0.5
-                    attempt -= 1  # Keep using the transport that worked.
+                    attempt -= 1
                     if is_rtsp:
                         print(f"Video connected over {transport.upper()}.")
                     for frame in container.decode(stream):

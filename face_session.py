@@ -1,17 +1,7 @@
 """Stream Misty's camera to this PC and keep a lock on one face in it.
 
 Misty streams its camera over RTSP; this PC detects faces (YuNet) and keeps a lock on
-one person by appearance (SFace). The session only watches: moving the head and wheels
-is up to the caller (see remote_approach.py). While a session is open, Misty's own
-camera features (TakePicture, on-board face detection) are unavailable, so pictures
-come from the stream instead (see tracked_view()).
-
-Typical use:
-
-    with FaceSession(misty, preview=True) as session:
-        while True:
-            result = session.step()   # Processes one frame.
-            if result and result.target is not None: ...
+one person by appearance (SFace).
 """
 
 from __future__ import annotations
@@ -20,7 +10,7 @@ import time
 
 import cv2
 
-try:  # Errors only; hides harmless DNN backend warnings.
+try:
     cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
 except AttributeError:
     pass
@@ -34,14 +24,13 @@ from settings import (CAMERA_FOV, MISTY_IP, STREAM_BITRATE, STREAM_FPS, STREAM_H
                       STREAM_PORT, STREAM_ROTATE, STREAM_TRANSPORT, STREAM_WIDTH)
 
 _STATE_COLORS = {TRACKING: (0, 200, 0), COASTING: (0, 200, 255)}
-# Clockwise rotation (degrees) -> OpenCV rotate code.
 _ROTATIONS = {0: None, 90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
               270: cv2.ROTATE_90_COUNTERCLOCKWISE}
 _ORIENTATION_VOTES = 5
 
 
 class StopRequested(Exception):
-    """Raised by step() when the user presses q in the preview window."""
+    pass
 
 
 class FaceSession:
@@ -52,12 +41,9 @@ class FaceSession:
                                    TrackerConfig(hfov_deg=CAMERA_FOV))
         self.result = None
         self._reader = None
-        # Clockwise degrees to turn each frame upright; None until worked out ("auto").
         self._rotation = None if STREAM_ROTATE == "auto" else int(STREAM_ROTATE)
         self._votes = dict.fromkeys(_ROTATIONS, 0)
         self._frame = None
-        # The newest frame in which the tracked person was actually seen, with their
-        # face box; None while nobody is being tracked.
         self._tracked_view = None
         self._seq = 0
         self._stats = [time.monotonic(), 0, 0.0]  # Since when, frames, processing seconds.
@@ -65,7 +51,6 @@ class FaceSession:
 
     # ----- lifecycle ---------------------------------------------------------------------
     def start(self) -> None:
-        """Start the stream and wait for video; cleans up again if that fails."""
         try:
             self._start()
         except BaseException:
@@ -86,7 +71,6 @@ class FaceSession:
         print("Starting Misty's video stream (on-board vision is paused while streaming)...")
         start_misty_stream(misty, STREAM_PORT, STREAM_WIDTH, STREAM_HEIGHT,
                            STREAM_FPS, STREAM_BITRATE)
-        # Misty's RTSP server takes a moment to come up after the start command.
         port_deadline = time.monotonic() + 15
         while not port_is_open(MISTY_IP, STREAM_PORT):
             if time.monotonic() > port_deadline:
@@ -123,7 +107,6 @@ class FaceSession:
 
     # ----- per-frame work ----------------------------------------------------------------
     def step(self, timeout: float = 2.0):
-        """Process the newest frame. Returns the TrackResult, or None if no frame arrived."""
         item = self._reader.wait_for_frame(self._seq, timeout=timeout)
         if item is None:
             return None
@@ -136,8 +119,6 @@ class FaceSession:
             code = _ROTATIONS[self._rotation]
             if code is not None:
                 frame = cv2.rotate(frame, code)
-            # Head angles are passed as 0, so the result is the face's angle from the
-            # centre of the picture: exactly the error the head has to remove.
             result = self.tracker.update(frame, 0.0, 0.0, t=received)
         self._frame, self.result = frame, result
         if result.target is not None:
@@ -151,10 +132,7 @@ class FaceSession:
         return result
 
     def _find_orientation(self, frame) -> TrackResult:
-        """Work out which way up the stream is: Misty's docs say it arrives rotated 90
-        degrees counterclockwise, but that is cheap to check rather than assume. The
-        face detector only fires confidently on upright faces, so the rotation that
-        keeps giving the best face wins."""
+        """Work out which way up the stream is."""
         best_score, best_rotation = 0.0, None
         for rotation, code in _ROTATIONS.items():
             turned = frame if code is None else cv2.rotate(frame, code)
@@ -171,14 +149,9 @@ class FaceSession:
 
     @property
     def frame(self):
-        """The most recently processed frame, upright; None before the first one."""
         return self._frame
 
     def tracked_view(self):
-        """The newest frame showing the tracked person, and their face box.
-
-        Returns (frame, (x, y, width, height)), or None while nobody is being tracked.
-        """
         return self._tracked_view
 
     # ----- diagnostics -------------------------------------------------------------------

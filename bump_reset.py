@@ -8,7 +8,6 @@ from face_utils import get_property
 
 
 class BumpReset:
-    """Request one reset while both front bump sensors are held together."""
 
     SENSOR_IDS = {"bfl": "left", "bfr": "right"}
     SENSOR_NAMES = {

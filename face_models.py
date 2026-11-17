@@ -9,7 +9,6 @@ import urllib.request
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 _ZOO = "https://github.com/opencv/opencv_zoo/raw/main/models"
 
-# YuNet: fast face detector (~0.2 MB). SFace: face embedding model for identity (~39 MB).
 MODELS = {
     "detector": (
         "face_detection_yunet_2023mar.onnx",
@@ -33,7 +32,6 @@ def _sha256(path: str) -> str:
 
 
 def model_path(key: str) -> str:
-    """Return the local path of a model, downloading and verifying it if needed."""
     filename, url, expected = MODELS[key]
     path = os.path.join(MODEL_DIR, filename)
     if os.path.exists(path) and _sha256(path) == expected:

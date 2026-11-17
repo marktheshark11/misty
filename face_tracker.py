@@ -1,14 +1,4 @@
 """PC-side face detection, identity locking and tracking in world-angle space.
-
-Why this fixes "snapping to other people": the tracker locks onto one person and keeps
-an appearance embedding (SFace) of them. A different face is only accepted if it is
-where the target is predicted to be *and* doesn't look like someone else, or if it
-matches the target's embedding. When the target is briefly lost, the tracker coasts
-on its motion estimate and then waits for that same person before picking anyone new.
-
-Positions are angles in degrees. Callers that pass head angles of 0 (as face_session
-does) get angles from the centre of the picture: positive yaw means the face is to
-Misty's left of centre, positive pitch means below centre.
 """
 
 from __future__ import annotations
@@ -29,15 +19,15 @@ class TrackerConfig:
     score_threshold: float = 0.7    # YuNet detection confidence.
     min_face_px: int = 24           # Ignore tiny faces (far away / false positives).
     min_face_px_for_id: int = 40    # Below this, embeddings are unreliable.
-    sim_match: float = 0.40         # Cosine similarity: same person (SFace suggests 0.363).
-    sim_uncertain: float = 0.30     # Between this and sim_match: "maybe", tolerated briefly.
-    max_uncertain_frames: int = 15  # ~0.5 s of "maybe" before treating it as someone else.
+    sim_match: float = 0.40         # Cosine similarity
+    sim_uncertain: float = 0.30
+    max_uncertain_frames: int = 15
     gate_deg: float = 7.0           # Base association radius around the prediction.
     max_speed_deg: float = 60.0     # Max plausible face angular speed for gating.
-    coast_time: float = 0.8         # Keep aiming at the prediction this long after a miss.
-    reacquire_time: float = 3.0     # Then wait this long for the *same* person.
+    coast_time: float = 0.8
+    reacquire_time: float = 3.0
     confirm_frames: int = 2         # Frames a new face must persist before locking on.
-    id_check_frames: int = 4        # Re-verify a lone target's identity this often.
+    id_check_frames: int = 4
     alpha: float = 0.8              # Position smoothing (1 = raw detections).
     beta: float = 0.0               # Velocity gain; 0 because in image space the head's
                                     # own motion would be mistaken for the face moving.
@@ -107,11 +97,10 @@ class FaceTracker:
         cy = row[1] + row[3] / 2.0
         ax = math.degrees(math.atan((cx - w / 2.0) / fx))
         ay = math.degrees(math.atan((cy - h / 2.0) / fx))
-        # Image right = robot yaw negative; image down = robot pitch positive.
         return head_yaw - ax, head_pitch + ay
 
     def _angular_width(self, width_px, image_w):
-        return width_px / image_w * self.cfg.hfov_deg  # Rough; only widens the gate.
+        return width_px / image_w * self.cfg.hfov_deg
 
     # ----- appearance --------------------------------------------------------------------
     def _feature(self, frame, face: Face):
@@ -212,13 +201,9 @@ class FaceTracker:
                     in_gate.append((dist, face))
             in_gate.sort(key=lambda item: item[0])
 
-            # Identity is checked whenever there's any doubt, and periodically otherwise.
-            # Steady single-face tracking skips it most frames to save ~10 ms per face.
             need_id = (self.state != TRACKING or len(faces) > 1
                        or self.frames_since_id >= cfg.id_check_frames)
 
-            # Once REACQUIRING, position means nothing (someone else may have stepped into
-            # the spot); only the target's identity can bring the lock back.
             if self.state in (TRACKING, COASTING) and in_gate:
                 nearest = in_gate[0][1]
                 if not need_id:
@@ -232,15 +217,12 @@ class FaceTracker:
                             chosen, best_sim = f, s
                         elif (s >= cfg.sim_uncertain and f is nearest
                               and self._uncertain_frames < cfg.max_uncertain_frames):
-                            # Same spot, ambiguous look (turned head, motion blur): keep
-                            # following briefly, but never learn from it.
                             chosen, best_sim = f, s
                     elif len(in_gate) == 1:
                         chosen = nearest  # Too small to identify; trust motion.
 
             uncertain = chosen is None or best_sim is None or best_sim < cfg.sim_match
             if self.anchor is not None and need_id and uncertain:
-                # A confident identity match anywhere in view beats a doubtful local pick.
                 for face in faces:
                     s = self._similarity(frame, face)
                     if s is not None and s >= cfg.sim_match and (best_sim is None or s > best_sim):
@@ -258,12 +240,11 @@ class FaceTracker:
             self.state = TRACKING
             self.frames_since_id += 1
             if best_sim is not None and best_sim >= cfg.sim_match:
-                self._update_template(frame, chosen)  # Only ever learn from confirmed matches.
+                self._update_template(frame, chosen)
             elif self.anchor is None:
-                self._update_template(frame, chosen)  # Locked on while too small to identify.
+                self._update_template(frame, chosen)
             return self._result(chosen, faces, best_sim)
 
-        # No match this frame.
         self.t = t
         if since_seen <= cfg.coast_time:
             self.state = COASTING
@@ -285,8 +266,6 @@ class FaceTracker:
 
     def _correct(self, face: Face, pred_yaw, pred_pitch, dt, t, reset_velocity=False) -> None:
         if self._pose_uncertainty > 1.5 and not reset_velocity:
-            # Seen, but the pose is unreliable: stay locked, and let the motion estimate
-            # fade rather than extrapolating it blindly until the pose is trustworthy.
             self.yaw, self.pitch = pred_yaw, pred_pitch
             self.vy *= 0.8
             self.vp *= 0.8
